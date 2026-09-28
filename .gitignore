@@ -1,0 +1,11 @@
+# Build output from build.sh scripts
+out/
+node_modules/
+dist/
+
+# Transfer bundles
+*.tar
+*.tar.sha256
+*.rpm
+
+.DS_Store

@@ -1,0 +1,29 @@
+{{- define "otel-poc.ingress" }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ .name }}
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: 20m
+spec:
+  ingressClassName: {{ .className }}
+  {{- with .tlsSecret }}
+  tls:
+    - hosts: [{{ $.host }}]
+      secretName: {{ . }}
+  {{- end }}
+  rules:
+    - host: {{ .host }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service: { name: {{ .service }}, port: { number: {{ .port }} } }
+{{- end }}
+{{- range .Values.apps }}
+---
+{{- include "otel-poc.ingress" (dict "name" (printf "%s-%s" $.Release.Name .name) "className" $.Values.ingressClassName "host" .host "tlsSecret" .tlsSecret "service" (printf "%s-proxy" $.Release.Name) "port" 80) }}
+{{- end }}
+---
+{{- include "otel-poc.ingress" (dict "name" (printf "%s-openobserve" .Release.Name) "className" .Values.ingressClassName "host" .Values.openobserve.host "tlsSecret" .Values.openobserve.tlsSecret "service" (printf "%s-openobserve" .Release.Name) "port" 5080) }}

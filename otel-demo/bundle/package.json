@@ -1,0 +1,22 @@
+{
+  "name": "bundle",
+  "version": "1.0.0",
+  "scripts": {
+    "build": "esbuild src/poc.js --bundle --minify --format=iife --target=firefox115,chrome109 --outfile=dist/poc.js"
+  },
+  "dependencies": {
+    "@openobserve/browser-logs": "^0.4.3",
+    "@openobserve/browser-rum": "^0.4.3",
+    "@opentelemetry/exporter-trace-otlp-http": "^0.222.0",
+    "@opentelemetry/instrumentation": "^0.222.0",
+    "@opentelemetry/instrumentation-document-load": "^0.67.0",
+    "@opentelemetry/instrumentation-fetch": "^0.222.0",
+    "@opentelemetry/instrumentation-user-interaction": "^0.66.0",
+    "@opentelemetry/instrumentation-xml-http-request": "^0.222.0",
+    "@opentelemetry/resources": "^2.11.0",
+    "@opentelemetry/sdk-trace-base": "^2.11.0",
+    "@opentelemetry/sdk-trace-web": "^2.11.0",
+    "esbuild": "^0.28.2"
+  },
+  "private": true
+}

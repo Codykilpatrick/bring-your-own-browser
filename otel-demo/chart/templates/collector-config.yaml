@@ -1,0 +1,46 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-collector
+data:
+  config.yaml: |
+    receivers:
+      otlp:
+        protocols:
+          http: { endpoint: 0.0.0.0:4318 }
+      # nginx access log lines arrive as JSON inside RFC 3164 syslog messages.
+      syslog/nginx:
+        protocol: rfc3164
+        udp: { listen_address: 0.0.0.0:5140 }
+        operators:
+          - type: json_parser
+            parse_from: attributes.message
+            parse_to: attributes
+          - type: remove
+            field: attributes.message
+
+    processors:
+      batch: {}
+
+    exporters:
+      otlp_http/traces:
+        endpoint: http://{{ .Release.Name }}-openobserve:5080/api/{{ .Values.openobserve.org }}
+        headers:
+          Authorization: Basic ${env:O2_BASIC_AUTH}
+          stream-name: default
+      otlp_http/access:
+        endpoint: http://{{ .Release.Name }}-openobserve:5080/api/{{ .Values.openobserve.org }}
+        headers:
+          Authorization: Basic ${env:O2_BASIC_AUTH}
+          stream-name: nginx_access
+
+    service:
+      pipelines:
+        traces:
+          receivers: [otlp]
+          processors: [batch]
+          exporters: [otlp_http/traces]
+        logs:
+          receivers: [syslog/nginx]
+          processors: [batch]
+          exporters: [otlp_http/access]

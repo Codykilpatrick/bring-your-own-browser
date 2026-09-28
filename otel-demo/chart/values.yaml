@@ -1,0 +1,74 @@
+# Registry and path the images were pushed to. The chart pulls <registry>/proxy:0.1.0,
+# <registry>/openobserve:v1.0.4 and <registry>/otelcol-contrib:0.161.0.
+registry: registry.local:5000/otel-poc
+
+ingressClassName: nginx
+
+# Applied to every pod. The PriorityClass must already exist on the cluster.
+priorityClassName: mission-specific
+
+# Applied to every pod. Meets the "restricted" Pod Security level.
+podSecurityContext:
+  runAsUser: 1000
+  runAsGroup: 1000
+  runAsNonRoot: true
+  seccompProfile: { type: RuntimeDefault }
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  privileged: false
+  capabilities: { drop: [ALL] }
+
+# Short label for the system these apps run on, attached to every span and RUM event.
+environment: lab
+
+# One entry per legacy app. Each gets its own hostname on the ingress; the proxy forwards to
+# upstream and injects the browser script. upstream can be a cluster Service or anything the pods
+# can reach, over http or https.
+apps:
+  - name: standin
+    version: "1.0"
+    host: standin.poc.local
+    upstream: http://otel-poc-standin:8080
+    # tlsSecret: standin-tls
+    # Drop the app's Content-Security-Policy header if it blocks the injected script.
+    stripCsp: false
+  # - name: port-manager
+  #   version: "4.2"
+  #   host: port-manager.poc.local
+  #   upstream: https://port-manager.lab.example:8443
+
+# Small two-page app for checking the install before pointing at a real one.
+standin:
+  enabled: true
+  resources:
+    requests: { cpu: 10m, memory: 16Mi }
+    limits: { cpu: 100m, memory: 64Mi }
+
+openobserve:
+  host: openobserve.poc.local
+  # tlsSecret: openobserve-tls
+  rootEmail: admin@poc.local
+  rootPassword: ChangeMe-PoC-1
+  org: default
+  # allow: record everything; mask-user-input: mask typed values; mask: mask all text.
+  privacyLevel: allow
+  # Empty keeps data inside the pod (emptyDir): nothing touches the node, and the data is gone
+  # whenever the pod restarts. To keep it, set a node directory such as
+  # /var/lib/otel-poc/openobserve, chown it 1000:1000, pin the node with nodeSelector, and allow
+  # hostPath in the namespace (the "restricted" Pod Security level forbids it).
+  hostPath: ""
+  nodeSelector: {}
+  resources:
+    requests: { cpu: 500m, memory: 1Gi }
+    limits: { cpu: "2", memory: 4Gi }
+
+collector:
+  resources:
+    requests: { cpu: 100m, memory: 128Mi }
+    limits: { cpu: 500m, memory: 512Mi }
+
+proxy:
+  replicas: 1
+  resources:
+    requests: { cpu: 100m, memory: 64Mi }
+    limits: { cpu: "1", memory: 256Mi }

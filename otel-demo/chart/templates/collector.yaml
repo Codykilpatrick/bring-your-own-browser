@@ -1,0 +1,46 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-collector
+spec:
+  selector: { app: {{ .Release.Name }}-collector }
+  ports:
+    - { name: otlp-http, port: 4318, targetPort: 4318 }
+    - { name: syslog, port: 5140, targetPort: 5140, protocol: UDP }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-collector
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: {{ .Release.Name }}-collector }
+  template:
+    metadata:
+      labels: { app: {{ .Release.Name }}-collector }
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/collector-config.yaml") . | sha256sum }}
+    spec:
+      {{- with .Values.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
+      securityContext: {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: collector
+          image: {{ .Values.registry }}/otelcol-contrib:0.161.0
+          securityContext: {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          args: [--config=/etc/otelcol/config.yaml]
+          env:
+            - name: O2_BASIC_AUTH
+              valueFrom:
+                secretKeyRef: { name: {{ .Release.Name }}-openobserve, key: O2_BASIC_AUTH }
+          ports:
+            - { containerPort: 4318 }
+            - { containerPort: 5140, protocol: UDP }
+          resources: {{- toYaml .Values.collector.resources | nindent 12 }}
+          volumeMounts:
+            - { name: config, mountPath: /etc/otelcol }
+      volumes:
+        - name: config
+          configMap: { name: {{ .Release.Name }}-collector }

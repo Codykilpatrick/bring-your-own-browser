@@ -1,0 +1,87 @@
+{{- if .Values.standin.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-standin
+data:
+  nginx.conf: |
+    pid /tmp/nginx.pid;
+    events {}
+    http {
+      include /etc/nginx/mime.types;
+      client_body_temp_path /tmp/client_temp;
+      proxy_temp_path /tmp/proxy_temp;
+      fastcgi_temp_path /tmp/fastcgi_temp;
+      uwsgi_temp_path /tmp/uwsgi_temp;
+      scgi_temp_path /tmp/scgi_temp;
+      server { listen 8080; root /etc/standin; }
+    }
+  index.html: |
+    <!doctype html>
+    <html><head><title>Stand-in: Dashboard</title></head>
+    <body>
+      <h1>Dashboard</h1>
+      <nav><a href="/index.html">Dashboard</a> | <a href="/reports.html">Reports</a></nav>
+      <button id="refresh">Refresh status</button>
+      <button id="port-map">Network Port Map</button>
+      <pre id="out"></pre>
+      <script>
+        document.getElementById('refresh').onclick = () =>
+          fetch('/status.json').then(r => r.text()).then(t => (document.getElementById('out').textContent = t));
+      </script>
+    </body></html>
+  reports.html: |
+    <!doctype html>
+    <html><head><title>Stand-in: Reports</title></head>
+    <body>
+      <h1>Reports</h1>
+      <nav><a href="/index.html">Dashboard</a> | <a href="/reports.html">Reports</a></nav>
+      <form action="/reports.html" method="get">
+        <label>Report name <input name="q"></label>
+        <select name="range"><option>Today</option><option>This week</option></select>
+        <button type="submit">Run report</button>
+      </form>
+      <button id="export">Export CSV</button>
+    </body></html>
+  status.json: |
+    {"status": "ok"}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-standin
+spec:
+  selector: { app: {{ .Release.Name }}-standin }
+  ports:
+    - { name: http, port: 8080, targetPort: 8080 }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-standin
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: {{ .Release.Name }}-standin }
+  template:
+    metadata:
+      labels: { app: {{ .Release.Name }}-standin }
+    spec:
+      {{- with .Values.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
+      securityContext: {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: nginx
+          image: {{ .Values.registry }}/proxy:0.1.0
+          securityContext: {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          args: [nginx, -c, /etc/standin/nginx.conf, -g, daemon off;]
+          ports:
+            - { containerPort: 8080 }
+          resources: {{- toYaml .Values.standin.resources | nindent 12 }}
+          volumeMounts:
+            - { name: site, mountPath: /etc/standin }
+      volumes:
+        - name: site
+          configMap: { name: {{ .Release.Name }}-standin }
+{{- end }}

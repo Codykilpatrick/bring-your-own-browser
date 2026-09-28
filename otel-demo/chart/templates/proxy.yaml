@@ -1,0 +1,41 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-proxy
+spec:
+  selector: { app: {{ .Release.Name }}-proxy }
+  ports:
+    - { name: http, port: 80, targetPort: 8080 }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-proxy
+spec:
+  replicas: {{ .Values.proxy.replicas }}
+  selector:
+    matchLabels: { app: {{ .Release.Name }}-proxy }
+  template:
+    metadata:
+      labels: { app: {{ .Release.Name }}-proxy }
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/proxy-config.yaml") . | sha256sum }}
+    spec:
+      {{- with .Values.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
+      securityContext: {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: nginx
+          image: {{ .Values.registry }}/proxy:0.1.0
+          securityContext: {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          ports:
+            - { containerPort: 8080 }
+          readinessProbe:
+            httpGet: { path: /healthz, port: 8080 }
+          resources: {{- toYaml .Values.proxy.resources | nindent 12 }}
+          volumeMounts:
+            - { name: config, mountPath: /etc/nginx/nginx.conf, subPath: nginx.conf }
+      volumes:
+        - name: config
+          secret: { secretName: {{ .Release.Name }}-proxy }

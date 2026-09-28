@@ -1,0 +1,2 @@
+FROM docker.io/library/nginx:1.30.5-alpine
+COPY bundle/dist/poc.js /usr/share/nginx/poc/poc.js

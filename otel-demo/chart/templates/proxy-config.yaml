@@ -1,0 +1,69 @@
+{{- $o := .Values.openobserve }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ .Release.Name }}-proxy
+stringData:
+  nginx.conf: |
+    worker_processes auto;
+    # Runs as non-root, so everything nginx writes goes to /tmp.
+    pid /tmp/nginx.pid;
+    events {}
+    http {
+      include mime.types;
+      client_body_temp_path /tmp/client_temp;
+      proxy_temp_path /tmp/proxy_temp;
+      fastcgi_temp_path /tmp/fastcgi_temp;
+      uwsgi_temp_path /tmp/uwsgi_temp;
+      scgi_temp_path /tmp/scgi_temp;
+      gzip on;
+      gzip_types application/javascript;
+      client_max_body_size 20m;
+      proxy_buffer_size 16k;
+      proxy_buffers 8 16k;
+
+      log_format usage escape=json '{"app":"$poc_app","host":"$host","method":"$request_method",'
+        '"uri":"$uri","args":"$args","status":$status,"bytes":$body_bytes_sent,'
+        '"request_time":$request_time,"referer":"$http_referer","user_agent":"$http_user_agent",'
+        '"client":"$http_x_forwarded_for","upstream":"$proxy_host"}';
+      access_log syslog:server={{ .Release.Name }}-collector:5140,tag=nginx_access usage;
+
+      server {
+        listen 8080 default_server;
+        set $poc_app "";
+        location = /healthz { access_log off; return 200; }
+      }
+      {{- range .Values.apps }}
+
+      server {
+        listen 8080;
+        server_name {{ .host }};
+        set $poc_app "{{ .name }}";
+
+        location = /__poc/poc.js { access_log off; add_header Cache-Control no-cache; alias /usr/share/nginx/poc/poc.js; }
+        location /__poc/otlp/ { access_log off; proxy_pass http://{{ $.Release.Name }}-collector:4318/; }
+        # The RUM client token is public by design; hand it out without exposing the rest of the API.
+        location = /__poc/o2/token {
+          access_log off;
+          limit_except GET { deny all; }
+          proxy_set_header Authorization "Basic {{ printf "%s:%s" $o.rootEmail $o.rootPassword | b64enc }}";
+          proxy_pass http://{{ $.Release.Name }}-openobserve:5080/api/{{ $o.org }}/rumtoken;
+        }
+        location /__poc/o2/rum/ { access_log off; proxy_pass http://{{ $.Release.Name }}-openobserve:5080/rum/; }
+
+        location / {
+          proxy_pass {{ .upstream }};
+          proxy_ssl_server_name on;
+          proxy_set_header X-Forwarded-For $http_x_forwarded_for;
+          proxy_set_header X-Forwarded-Proto $http_x_forwarded_proto;
+          # sub_filter can only rewrite uncompressed bodies.
+          proxy_set_header Accept-Encoding "";
+          {{- if .stripCsp }}
+          proxy_hide_header Content-Security-Policy;
+          {{- end }}
+          sub_filter_once on;
+          sub_filter '</head>' '<script defer src="/__poc/poc.js" data-app="{{ .name }}" data-version="{{ .version }}" data-env="{{ $.Values.environment }}" data-org="{{ $o.org }}" data-privacy="{{ $o.privacyLevel }}"></script></head>';
+        }
+      }
+      {{- end }}
+    }

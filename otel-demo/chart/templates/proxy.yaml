@@ -20,9 +20,15 @@ spec:
       labels: { app: {{ .Release.Name }}-proxy }
       annotations:
         checksum/config: {{ include (print $.Template.BasePath "/proxy-config.yaml") . | sha256sum }}
+        {{- if .Values.proxy.networkAttachments.enabled }}
+        k8s.v1.cni.cncf.io/networks: {{ toJson .Values.proxy.networkAttachments.entries | quote }}
+        {{- end }}
     spec:
       {{- with .Values.priorityClassName }}
       priorityClassName: {{ . }}
+      {{- end }}
+      {{- with .Values.proxy.hostAliases }}
+      hostAliases: {{- toYaml . | nindent 8 }}
       {{- end }}
       securityContext: {{- toYaml .Values.podSecurityContext | nindent 8 }}
       containers:

@@ -32,6 +32,9 @@ apps:
     # tlsSecret: standin-tls
     # Drop the app's Content-Security-Policy header if it blocks the injected script.
     stripCsp: false
+    # Optional: also serve this app on its own proxy port, so http://<proxy IP>:<port>/ works
+    # without DNS or the ingress (for example on a Multus IP). Use 8081 and up.
+    # port: 8081
   # - name: port-manager
   #   version: "4.2"
   #   host: port-manager.poc.local
@@ -58,6 +61,10 @@ openobserve:
   # hostPath in the namespace (the "restricted" Pod Security level forbids it).
   hostPath: ""
   nodeSelector: {}
+  # Multus networks, same shape as proxy.networkAttachments.
+  networkAttachments:
+    enabled: false
+    entries: []
   resources:
     requests: { cpu: 500m, memory: 1Gi }
     limits: { cpu: "2", memory: 4Gi }
@@ -69,6 +76,16 @@ collector:
 
 proxy:
   replicas: 1
+  # Multus networks, so browsers can reach the proxy directly.
+  networkAttachments:
+    enabled: false
+    entries: []
+    # - { name: lab-net, namespace: otel-poc }
+  # Hosts-file entries for upstreams the cluster DNS can't resolve, such as bare metal boxes.
+  # nginx resolves every upstream at startup, so one unknown name crash-loops the proxy.
+  hostAliases: []
+  # - ip: 10.1.2.3
+  #   hostnames: [sysvue]
   resources:
     requests: { cpu: 100m, memory: 64Mi }
     limits: { cpu: "1", memory: 256Mi }

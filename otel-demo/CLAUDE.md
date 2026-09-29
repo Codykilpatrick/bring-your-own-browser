@@ -58,6 +58,16 @@ OpenObserve flattens span attributes: query `target_text`, `page_path`, `rum_ses
   both nginx configs put `pid` and all `*_temp_path`s in `/tmp`, and the stand-in listens on 8080
   with its own config at `/etc/standin/nginx.conf`. A hostPath, if set, needs `chown 1000:1000` on
   the node or OpenObserve panics with "Permission denied". Test with `kubectl label ns otel-poc pod-security.kubernetes.io/enforce=restricted`.
+- **`proxy.hostAliases`** exists because high-side app servers are bare metal boxes the cluster DNS
+  doesn't know (for example `sysvue`), and nginx crash-loops on an unresolvable upstream. Upstreams
+  are server-only URLs with no path; a path in `proxy_pass` rewrites every request and breaks SPAs.
+- **Multus, not the ingress, is how high-side browsers reach the cluster.** `proxy.networkAttachments`
+  and `openobserve.networkAttachments` (`enabled`, `entries`, rendered with `toJson | quote`, the
+  team's standard pattern) carry the network. Separate per pod because entries may pin static IPs. Because a raw IP matches no
+  `server_name`, `apps[].port` adds a per-app `listen` so `http://<proxy IP>:<port>/` works with no
+  DNS. The first real app is `sonsym` at `https://sysvue:8443`, served under `/sysvue/`.
+- **WebSockets pass through** (`proxy_http_version 1.1` plus `Upgrade`/`Connection` headers,
+  1h read timeout). sym keeps a live connection and showed "connection unavailable" without it.
 - **Every pod sets `priorityClassName: mission-specific`** (high-side requirement). In kind, create
   it first: `kubectl create priorityclass mission-specific --value=1000000`.
 

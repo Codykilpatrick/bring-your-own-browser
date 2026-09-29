@@ -31,6 +31,9 @@ spec:
       labels: { app: {{ .Release.Name }}-openobserve }
       annotations:
         checksum/secret: {{ printf "%s%s" $o.rootEmail $o.rootPassword | sha256sum }}
+        {{- if $o.networkAttachments.enabled }}
+        k8s.v1.cni.cncf.io/networks: {{ toJson $o.networkAttachments.entries | quote }}
+        {{- end }}
     spec:
       {{- with .Values.priorityClassName }}
       priorityClassName: {{ . }}

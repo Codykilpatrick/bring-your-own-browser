@@ -55,6 +55,31 @@ What you should see:
 - Traces: `click`, `change`, `submit` spans
 - RUM, Sessions: one session with a replay
 
+## Reaching it over Multus instead of the ingress
+
+If browsers reach the cluster through Multus IPs, give the proxy and OpenObserve a network and
+give each app its own port:
+
+```yaml
+apps:
+  - name: sonsym
+    version: "4.2"
+    host: sym.poc.local
+    upstream: https://sysvue:8443
+    port: 8081
+proxy:
+  networkAttachments:
+    enabled: true
+    entries: [{ name: <network attachment>, namespace: <namespace> }]
+openobserve:
+  networkAttachments:
+    enabled: true
+    entries: [{ name: <network attachment>, namespace: <namespace> }]
+```
+
+Then browse `http://<proxy Multus IP>:8081/sysvue/` and `http://<OpenObserve Multus IP>:5080`.
+Find the IPs with `kubectl -n <ns> get pod <pod> -o jsonpath='{.metadata.annotations.k8s\.v1\.cni\.cncf\.io/network-status}'`.
+
 ## Add a real app
 
 Add an entry under `apps` in `values.yaml` (name, version, host, upstream), then
@@ -69,5 +94,12 @@ Set `standin.enabled: false` once you don't need the stand-in.
 - Nothing is written to the node. OpenObserve keeps its data inside the pod, so a pod restart
   wipes all collected usage and replays. To keep data, see the comment on `openobserve.hostPath`
   in `values.yaml`.
-- nginx resolves upstream hostnames at startup. An upstream the pods can't resolve crash-loops the proxy.
+- nginx resolves upstream hostnames at startup. An upstream the pods can't resolve crash-loops the
+  proxy (`host not found in upstream`). Add the name and IP under `proxy.hostAliases`, or use the IP
+  in `upstream`. Check reachability with
+  `kubectl -n <ns> exec deploy/otel-poc-proxy -- wget -S -O /dev/null --no-check-certificate <upstream>`.
+- If the app loads and then says it lost its connection, check `kubectl -n <ns> get endpoints otel-poc-openobserve`
+  and the app's own live connection. The proxy passes WebSockets through.
+- `upstream` is the server only (`https://sysvue:8443`), no path. Users open the path on the new
+  host (`http://sym.poc.local/vue/`).
 - The proxy sends the upstream's own hostname as `Host`. Apps that build absolute links from it can send users around the proxy.

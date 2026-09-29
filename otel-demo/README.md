@@ -98,8 +98,11 @@ Set `standin.enabled: false` once you don't need the stand-in.
   proxy (`host not found in upstream`). Add the name and IP under `proxy.hostAliases`, or use the IP
   in `upstream`. Check reachability with
   `kubectl -n <ns> exec deploy/otel-poc-proxy -- wget -S -O /dev/null --no-check-certificate <upstream>`.
-- If the app loads and then says it lost its connection, check `kubectl -n <ns> get endpoints otel-poc-openobserve`
-  and the app's own live connection. The proxy passes WebSockets through.
+- If the app loads and then says it lost its connection: the proxy passes WebSockets through, and
+  HTTPS upstreams also get `Origin` rewritten to the real app plus Secure cookies stripped. Confirm
+  the running config has `proxy_set_header Origin` and `connection_upgrade`. If the OpenObserve
+  Service has no endpoints (`kubectl -n <ns> get endpoints otel-poc-openobserve` empty) but the
+  Multus UI works, set `openobserve.url: http://<OpenObserve Multus IP>:5080`.
 - `upstream` is the server only (`https://sysvue:8443`), no path. Users open the path on the new
   host (`http://sym.poc.local/vue/`).
 - The proxy sends the upstream's own hostname as `Host`. Apps that build absolute links from it can send users around the proxy.

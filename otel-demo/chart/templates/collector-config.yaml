@@ -24,12 +24,12 @@ data:
 
     exporters:
       otlp_http/traces:
-        endpoint: http://{{ .Release.Name }}-openobserve:5080/api/{{ .Values.openobserve.org }}
+        endpoint: {{ .Values.openobserve.url | default (printf "http://%s-openobserve:5080" .Release.Name) }}/api/{{ .Values.openobserve.org }}
         headers:
           Authorization: Basic ${env:O2_BASIC_AUTH}
           stream-name: default
       otlp_http/access:
-        endpoint: http://{{ .Release.Name }}-openobserve:5080/api/{{ .Values.openobserve.org }}
+        endpoint: {{ .Values.openobserve.url | default (printf "http://%s-openobserve:5080" .Release.Name) }}/api/{{ .Values.openobserve.org }}
         headers:
           Authorization: Basic ${env:O2_BASIC_AUTH}
           stream-name: nginx_access

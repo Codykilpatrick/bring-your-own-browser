@@ -1,4 +1,5 @@
 {{- $o := .Values.openobserve }}
+{{- $o2 := $o.url | default (printf "http://%s-openobserve:5080" .Release.Name) }}
 apiVersion: v1
 kind: Secret
 metadata:
@@ -23,12 +24,12 @@ stringData:
       proxy_buffers 8 16k;
 
       # WebSocket passthrough: apps that keep a live connection to their server need the upgrade.
-      map $http_upgrade $connection_upgrade { default upgrade; '' close; }
+      map $http_upgrade $connection_upgrade { default upgrade; '' keep-alive; }
       # Behind the ingress this comes from ingress-nginx; direct on a Multus IP it's our own scheme.
       map $http_x_forwarded_proto $forwarded_proto { default $http_x_forwarded_proto; '' $scheme; }
 
       log_format usage escape=json '{"app":"$poc_app","host":"$host","method":"$request_method",'
-        '"uri":"$uri","args":"$args","status":$status,"bytes":$body_bytes_sent,'
+        '"uri":"$uri","args":"$args","status":$status,"bytes":$body_bytes_sent,"upgrade":"$http_upgrade",'
         '"request_time":$request_time,"referer":"$http_referer","user_agent":"$http_user_agent",'
         '"client":"$proxy_add_x_forwarded_for","upstream":"$proxy_host"}';
       access_log syslog:server={{ .Release.Name }}-collector:5140,tag=nginx_access usage;
@@ -55,9 +56,9 @@ stringData:
           access_log off;
           limit_except GET { deny all; }
           proxy_set_header Authorization "Basic {{ printf "%s:%s" $o.rootEmail $o.rootPassword | b64enc }}";
-          proxy_pass http://{{ $.Release.Name }}-openobserve:5080/api/{{ $o.org }}/rumtoken;
+          proxy_pass {{ $o2 }}/api/{{ $o.org }}/rumtoken;
         }
-        location /__poc/o2/rum/ { access_log off; proxy_pass http://{{ $.Release.Name }}-openobserve:5080/rum/; }
+        location /__poc/o2/rum/ { access_log off; proxy_pass {{ $o2 }}/rum/; }
 
         location / {
           proxy_pass {{ .upstream }};
@@ -68,6 +69,15 @@ stringData:
           proxy_read_timeout 1h;
           proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
           proxy_set_header X-Forwarded-Proto $forwarded_proto;
+          # HTTPS apps behind this HTTP proxy reject the browser Origin (the Multus IP)
+          # and set Secure cookies the browser then drops. Rewrite both.
+          {{- if or .origin (hasPrefix "https://" .upstream) }}
+          proxy_set_header Origin {{ .origin | default .upstream }};
+          proxy_redirect {{ .upstream }}/ /;
+          proxy_redirect {{ .upstream }} /;
+          proxy_cookie_flags ~ nosecure;
+          proxy_hide_header Strict-Transport-Security;
+          {{- end }}
           # sub_filter can only rewrite uncompressed bodies.
           proxy_set_header Accept-Encoding "";
           {{- if .stripCsp }}

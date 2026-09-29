@@ -67,7 +67,11 @@ OpenObserve flattens span attributes: query `target_text`, `page_path`, `rum_ses
   `server_name`, `apps[].port` adds a per-app `listen` so `http://<proxy IP>:<port>/` works with no
   DNS. The first real app is `sonsym` at `https://sysvue:8443`, served under `/sysvue/`.
 - **WebSockets pass through** (`proxy_http_version 1.1` plus `Upgrade`/`Connection` headers,
-  1h read timeout). sym keeps a live connection and showed "connection unavailable" without it.
+  1h read timeout). That alone was not enough for sysvue: the browser Origin is
+  `http://<multus>:8081`, and an HTTPS app that checks Origin rejects it. For `https://`
+  upstreams (or an explicit `apps[].origin`) the proxy rewrites Origin, strips Secure on
+  cookies, hides HSTS, and rewrites redirects. `openobserve.url` bypasses a dead cluster
+  Service when Multus stole the default route.
 - **Every pod sets `priorityClassName: mission-specific`** (high-side requirement). In kind, create
   it first: `kubectl create priorityclass mission-specific --value=1000000`.
 

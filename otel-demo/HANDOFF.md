@@ -19,28 +19,29 @@ The stack is installed and running. Browsers do **not** use ingress hostnames; t
 OpenObserve login: `admin@poc.local` / `ChangeMe-PoC-1` (unless `rootPassword` was changed).
 
 The first page of sysvue **does load** through the proxy. Then the UI says connection unavailable.
-Cody's last proxy log:
+The token `connection refused` to `otel-poc-openobserve:5080` is a **separate** OpenObserve
+Service problem (replay only). The drop after first paint is sysvue's live connection.
 
+WebSocket passthrough was applied and was not enough. The browser Origin is
+`http://<Multus IP>:8081`. sysvue is HTTPS and almost certainly rejects that Origin, or sets
+Secure cookies the HTTP page then drops.
+
+## Apply this chart update
+
+`otel-demo/otel-poc-chart-update.tar` (see `otel-poc-chart-update.tar.sha256`). Chart only.
+Images are unchanged (`proxy:0.1.0`, OpenObserve `v1.0.4`, `otelcol-contrib` `0.161.0`).
+
+For any `https://` upstream the proxy now rewrites `Origin` to the upstream, strips Secure
+on cookies, hides HSTS, and rewrites redirects. In kind, a server that required
+`Origin: https://sysvue:8443` returned 403 through the last shipped chart and `101` through
+this one.
+
+If OpenObserve's Service has no endpoints but the Multus UI works, also set:
+
+```yaml
+openobserve:
+  url: http://<OpenObserve Multus IP>:5080
 ```
-connect() failed (111: Connection refused) while connecting to upstream
-GET /__poc/o2/token
-upstream http://10.161.101.118:5080/api/default/rumtoken
-```
-
-That token error is OpenObserve, not sysvue. It only turns replay off. The "connection unavailable"
-after a flash of the real UI is almost certainly sysvue's own live WebSocket dying. The **current
-high-side chart does not pass WebSockets**. That fix is in the latest chart-only tar and has **not**
-been applied on the high side yet.
-
-## Apply first thing tomorrow
-
-`otel-demo/otel-poc-chart-update.tar`, checksum `961514e5…f030` in
-`otel-poc-chart-update.tar.sha256`. Chart only. Images are unchanged (`proxy:0.1.0`,
-OpenObserve `v1.0.4`, `otelcol-contrib` `0.161.0`).
-
-This tar includes WebSocket passthrough (`Upgrade` / `Connection`, HTTP/1.1, 1h read timeout).
-In kind, the old chart returned `200` on a WebSocket upgrade; this one returns `101` and the
-message gets through.
 
 It **overwrites** `chart/` and `README.md`. If Cody hand-edited `proxy-config.yaml` on the high
 side, that edit is gone. Keep high-side settings in a file **outside** `chart/` (`my-values.yaml`)
@@ -53,11 +54,13 @@ helm package chart
 helm upgrade otel-poc otel-poc-0.1.0.tgz -n <namespace> -f my-values.yaml
 ```
 
-Then confirm nginx has the port and the upgrade map:
+Then confirm nginx has the port, the upgrade map, and the Origin rewrite:
 
 ```bash
-kubectl -n <ns> exec deploy/otel-poc-proxy -- grep -n "listen 8081\|connection_upgrade" /etc/nginx/nginx.conf
+kubectl -n <ns> exec deploy/otel-poc-proxy -- grep -n "listen 8081\|connection_upgrade\|proxy_set_header Origin" /etc/nginx/nginx.conf
 ```
+
+You want a line `proxy_set_header Origin https://sysvue:8443;` in the sonsym server.
 
 ## Values that should be on the high side
 

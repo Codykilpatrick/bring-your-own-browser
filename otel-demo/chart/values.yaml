@@ -53,6 +53,10 @@ openobserve:
   rootEmail: admin@poc.local
   rootPassword: ChangeMe-PoC-1
   org: default
+  # How the proxy and collector reach OpenObserve. Empty uses the cluster Service.
+  # If `kubectl get endpoints otel-poc-openobserve` is empty but the Multus UI works,
+  # set this to http://<OpenObserve Multus IP>:5080.
+  url: ""
   # allow: record everything; mask-user-input: mask typed values; mask: mask all text.
   privacyLevel: allow
   # Empty keeps data inside the pod (emptyDir): nothing touches the node, and the data is gone

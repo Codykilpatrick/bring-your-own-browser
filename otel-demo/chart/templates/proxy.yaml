@@ -37,6 +37,11 @@ spec:
           securityContext: {{- toYaml .Values.containerSecurityContext | nindent 12 }}
           ports:
             - { containerPort: 8080 }
+            {{- range .Values.apps }}
+            {{- with .port }}
+            - { containerPort: {{ . }} }
+            {{- end }}
+            {{- end }}
           readinessProbe:
             httpGet: { path: /healthz, port: 8080 }
           resources: {{- toYaml .Values.proxy.resources | nindent 12 }}

@@ -32,6 +32,9 @@ apps:
     # tlsSecret: standin-tls
     # Drop the app's Content-Security-Policy header if it blocks the injected script.
     stripCsp: false
+    # Send the browser's host through. Next.js returns 403 on POST /api/auth when
+    # Host has been replaced with the upstream address.
+    # preserveHost: true
     # Optional: also serve this app on its own proxy port, so http://<proxy IP>:<port>/ works
     # without DNS or the ingress (for example on a Multus IP). Use 8081 and up.
     # port: 8081

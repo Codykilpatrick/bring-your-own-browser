@@ -69,6 +69,10 @@ stringData:
           proxy_read_timeout 1h;
           proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
           proxy_set_header X-Forwarded-Proto $forwarded_proto;
+          {{- if .preserveHost }}
+          proxy_set_header Host $http_host;
+          proxy_set_header X-Forwarded-Host $http_host;
+          {{- end }}
           # HTTPS apps behind this HTTP proxy reject the browser Origin (the Multus IP)
           # and set Secure cookies the browser then drops. Rewrite both.
           {{- if or .origin (hasPrefix "https://" .upstream) }}

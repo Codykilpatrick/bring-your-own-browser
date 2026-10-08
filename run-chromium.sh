@@ -8,7 +8,14 @@ mkdir -p "$PROFILE"
 
 xhost +SI:localuser:"$(whoami)" >/dev/null
 
+# Share the host D-Bus so Chromium stops logging "Failed to connect to the bus".
+BUS=/run/user/$(id -u)/bus
+DBUS=()
+[[ -S $BUS ]] && DBUS+=(-v "$BUS:$BUS" -e DBUS_SESSION_BUS_ADDRESS="unix:path=$BUS")
+[[ -S /run/dbus/system_bus_socket ]] && DBUS+=(-v /run/dbus/system_bus_socket:/run/dbus/system_bus_socket)
+
 exec podman run --rm \
+  "${DBUS[@]}" \
   --device nvidia.com/gpu=all \
   --security-opt label=disable \
   --userns keep-id \

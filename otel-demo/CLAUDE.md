@@ -16,6 +16,11 @@ with plain `helm package` + `helm install`. No install scripts on the high side,
 - `build.sh`: builds everything for linux/amd64 into `out/` (images tar, `chart/`, `README.md`,
   `SHA256SUMS`). `otel-poc-transfer.tar` is just `out/` tarred up for the transfer.
 - `README.md`: high-side install steps. Keep it short; it ships in the bundle.
+- `chart/files/dashboard.json`: the "Web app usage" OpenObserve dashboard. Nothing in the chart
+  reads it; import it in the OpenObserve UI after each restart. The hidden `o2_url` variable is
+  the address browsers use for OpenObserve (the replay links need it) and defaults to
+  `http://openobserve.poc.local`. The UI import refuses an empty `dashboardId`; OpenObserve assigns
+  its own ID anyway, so the file's `web-app-usage` is just a placeholder.
 
 ## How data flows
 
@@ -107,6 +112,11 @@ every proxy rollout. Tear down with `kind delete cluster --name otel-poc`.
 
 - Replay playback in the OpenObserve UI hasn't been watched end to end; segments do arrive.
 - RUM's own click `action` events don't show up in `_rumdata`. The OTel spans are the usage record.
+- RUM sends a view event again each time the view updates. Count `distinct view_id`, and take
+  `max(view_time_spent)` per view for time on page.
+- No alerts. Alert destinations on localhost or private addresses are refused unless
+  `ZO_SSRF_ALLOW_LOOPBACK` or `ZO_SKIP_SSRF_CHECKS` is set, and real-time alerts skip rows that
+  pass through a pipeline.
 - Release name must stay `otel-poc` unless the stand-in's `upstream` in `values.yaml` changes.
 - High-side snags (SELinux on the hostPath, CIS Pod Security, upstream DNS at nginx start, the
   `Host` header) are listed in `README.md`.

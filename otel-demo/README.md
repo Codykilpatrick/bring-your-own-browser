@@ -55,6 +55,20 @@ What you should see:
 - Traces: `click`, `change`, `submit` spans
 - RUM, Sessions: one session with a replay
 
+## Load the dashboard
+
+OpenObserve only takes dashboards through its UI or API, so import it by hand. Do it again after
+every OpenObserve restart; the in-pod storage loses it.
+
+1. In OpenObserve: Dashboards, Import, Custom, File Upload / JSON. Select
+   `chart/files/dashboard.json`, then Import.
+2. Open "Web app usage". Usage has page views, clicks, time on page, changes made through the
+   apps, and recent sessions; click a session to open its replay. Health has server errors,
+   browser errors, and the slowest requests.
+3. The replay links go to `http://openobserve.poc.local`. If you reach OpenObserve at another
+   address (a different `openobserve.host`, or the Multus IP), open the dashboard's settings
+   (gear icon), Variables, and change `o2_url` to that address.
+
 ## Reaching it over Multus instead of the ingress
 
 If browsers reach the cluster through Multus IPs, give the proxy and OpenObserve a network and

@@ -1,0 +1,5 @@
+# helm install -f kind/values.yaml after kubectl apply -f kind/demo-apps.yaml
+standin: { enabled: false }
+apps:
+  - { name: redpanda-console, version: "3.9.0", host: console.localhost, upstream: "http://console.demo:8080", port: 8082 }
+  - { name: headlamp, version: "0.44.0", host: headlamp.localhost, upstream: "http://headlamp.demo:4466", port: 8083, privacy: mask }

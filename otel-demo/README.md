@@ -22,7 +22,7 @@ Writes `out/`: `otel-poc-images.tar` (linux/amd64), `chart/`, and `SHA256SUMS`. 
 
    ```bash
    podman load -i otel-poc-images.tar
-   for img in proxy:0.1.0 openobserve:v1.0.4 otelcol-contrib:0.161.0; do
+   for img in proxy:0.1.1 openobserve:v1.0.4 otelcol-contrib:0.161.0; do
      podman tag localhost/otel-poc/$img <registry>/otel-poc/$img
      podman push <registry>/otel-poc/$img
    done
@@ -68,6 +68,25 @@ every OpenObserve restart; the in-pod storage loses it.
 3. The replay links go to `http://openobserve.poc.local`. If you reach OpenObserve at another
    address (a different `openobserve.host`, or the Multus IP), open the dashboard's settings
    (gear icon), Variables, and change `o2_url` to that address.
+
+## Load the feature catalog and usage dashboards
+
+Three more dashboards show which features of each app are used. They read a feature list,
+`chart/files/feature_catalog.csv`, that you load as an enrichment table. Like the dashboard
+above, redo both steps after every OpenObserve restart.
+
+1. Data, Enrichment Tables, New enrichment table. Name it exactly `feature_catalog`, choose
+   Upload File, select `chart/files/feature_catalog.csv`, then Save.
+2. Dashboards, Import, File Upload / JSON. Import each file in `chart/files/dashboards/`:
+   `usage-summary.json`, `feature-inventory.json`, `collection-coverage.json`.
+3. Open "Feature inventory". Every cataloged page and control is listed, least used first. Before
+   calling a zero unused, check "Collection coverage" for the same time range.
+
+The `app` column in the catalog must match `name` under `apps` in `values.yaml`.
+
+Headlamp shows Secrets and a token login, so give it `privacy: mask` on its `apps` entry. Its
+replays then show every piece of text as `x`. `privacy` on an app overrides
+`openobserve.privacyLevel` for that app only.
 
 ## Reaching it over Multus instead of the ingress
 

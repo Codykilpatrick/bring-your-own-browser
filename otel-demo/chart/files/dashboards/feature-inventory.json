@@ -1,0 +1,1609 @@
+{
+  "version": 8,
+  "role": "",
+  "owner": "",
+  "created": "2026-10-09T00:00:00.000Z",
+  "variables": {
+    "showDynamicFilters": false,
+    "list": [
+      {
+        "type": "query_values",
+        "name": "app",
+        "label": "App",
+        "scope": "global",
+        "query_data": {
+          "stream_type": "logs",
+          "stream": "nginx_access",
+          "field": "app",
+          "max_record_size": null,
+          "filter": []
+        },
+        "value": "",
+        "options": [],
+        "multiSelect": true,
+        "hideOnDashboard": false,
+        "selectAllValueForMultiSelect": "all",
+        "customMultiSelectValue": [],
+        "escapeSingleQuotes": false
+      },
+      {
+        "type": "constant",
+        "name": "o2_url",
+        "label": "OpenObserve URL",
+        "scope": "global",
+        "value": "http://openobserve.poc.local",
+        "hideOnDashboard": true,
+        "multiSelect": false,
+        "options": [],
+        "escapeSingleQuotes": false
+      }
+    ]
+  },
+  "dashboardId": "feature-inventory",
+  "title": "Feature inventory",
+  "description": "Every cataloged page and control with how often it was used, least used first. Catalog: feature_catalog enrichment table.",
+  "defaultDatetimeDuration": {
+    "type": "relative",
+    "relativeTimePeriod": "7d",
+    "startTime": null,
+    "endTime": null
+  },
+  "tabs": [
+    {
+      "tabId": "default",
+      "name": "Default",
+      "panels": [
+        {
+          "id": "Panel_ID2001",
+          "type": "table",
+          "title": "Pages: sessions and views, least used first",
+          "description": "Every page row in the catalog. Sessions that opened the page at least once, and views that stayed open a second or more. Zero means no recorded browser opened it in the selected time range; check Collection coverage before calling it unused.",
+          "config": {
+            "show_legends": true,
+            "legends_position": null,
+            "unit": null,
+            "decimals": 0,
+            "line_thickness": 1.5,
+            "step_value": "0",
+            "top_results_others": false,
+            "axis_border_show": false,
+            "label_option": {
+              "rotate": 0
+            },
+            "show_symbol": false,
+            "line_interpolation": "smooth",
+            "legend_width": {
+              "unit": "px"
+            },
+            "base_map": {
+              "type": "osm"
+            },
+            "map_type": {
+              "type": "world"
+            },
+            "map_view": {
+              "zoom": 1,
+              "lat": 0,
+              "lng": 0
+            },
+            "map_symbol_style": {
+              "size": "by Value",
+              "size_by_value": {
+                "min": 1,
+                "max": 100
+              },
+              "size_fixed": 2
+            },
+            "drilldown": [],
+            "mark_line": [],
+            "override_config": [
+              {
+                "field": {
+                  "matchBy": "name",
+                  "value": "sessions"
+                },
+                "config": [
+                  {
+                    "type": "field_type",
+                    "value": "text"
+                  },
+                  {
+                    "type": "alignment",
+                    "value": "right"
+                  }
+                ]
+              },
+              {
+                "field": {
+                  "matchBy": "name",
+                  "value": "views"
+                },
+                "config": [
+                  {
+                    "type": "field_type",
+                    "value": "text"
+                  },
+                  {
+                    "type": "alignment",
+                    "value": "right"
+                  }
+                ]
+              }
+            ],
+            "connect_nulls": false,
+            "no_value_replacement": "",
+            "wrap_table_cells": false,
+            "table_transpose": false,
+            "table_dynamic_columns": false,
+            "color": {
+              "mode": "palette-classic-by-series",
+              "fixedColor": [],
+              "seriesBy": "last",
+              "colorBySeries": []
+            },
+            "trellis": {
+              "layout": null,
+              "num_of_columns": 1,
+              "group_by_y_axis": false
+            },
+            "table_pagination": false
+          },
+          "queryType": "sql",
+          "queries": [
+            {
+              "query": "SELECT c.app, c.feature_name AS feature, count(DISTINCT v.session_id) AS sessions, count(DISTINCT CASE WHEN v.spent >= 1e9 THEN v.view_id END) AS views, to_char(to_timestamp_micros(max(v.ts)), '%Y-%m-%d %H:%M') AS last_used_utc, c.feature_id FROM enrich.feature_catalog c LEFT JOIN (SELECT service, session_id, view_id, regexp_replace(regexp_replace(view_url, '^https?://[^/]+|[?][^#]*', '', 'g'), '(.)/(#|$)', '$1$2') AS path, max(view_time_spent) AS spent, min(_timestamp) AS ts FROM \"_rumdata\" WHERE type = 'view' AND (service IN ($app) OR '_o2_all_' IN ($app)) GROUP BY service, session_id, view_id, path) v ON v.service = c.app AND regexp_like(v.path, c.path_pattern) WHERE c.kind = 'page' AND (c.app IN ($app) OR '_o2_all_' IN ($app)) GROUP BY c.app, c.feature_name, c.feature_id ORDER BY sessions ASC, views ASC, c.app, feature",
+              "vrlFunctionQuery": "",
+              "customQuery": true,
+              "fields": {
+                "stream": "_rumdata",
+                "stream_type": "logs",
+                "x": [
+                  {
+                    "label": "",
+                    "alias": "app",
+                    "column": "app",
+                    "color": null,
+                    "isDerived": false,
+                    "havingConditions": [],
+                    "treatAsNonTimestamp": true,
+                    "type": "custom",
+                    "functionName": null,
+                    "args": []
+                  },
+                  {
+                    "label": "",
+                    "alias": "feature",
+                    "column": "feature",
+                    "color": null,
+                    "isDerived": false,
+                    "havingConditions": [],
+                    "treatAsNonTimestamp": true,
+                    "type": "custom",
+                    "functionName": null,
+                    "args": []
+                  },
+                  {
+                    "label": "",
+                    "alias": "last_used_utc",
+                    "column": "last_used_utc",
+                    "color": null,
+                    "isDerived": false,
+                    "havingConditions": [],
+                    "treatAsNonTimestamp": true,
+                    "type": "custom",
+                    "functionName": null,
+                    "args": []
+                  }
+                ],
+                "y": [
+                  {
+                    "label": "",
+                    "alias": "sessions",
+                    "column": "sessions",
+                    "color": null,
+                    "isDerived": false,
+                    "havingConditions": [],
+                    "treatAsNonTimestamp": true,
+                    "type": "custom",
+                    "functionName": null,
+                    "args": []
+                  },
+                  {
+                    "label": "",
+                    "alias": "views",
+                    "column": "views",
+                    "color": null,
+                    "isDerived": false,
+                    "havingConditions": [],
+                    "treatAsNonTimestamp": true,
+                    "type": "custom",
+                    "functionName": null,
+                    "args": []
+                  }
+                ],
+                "z": [],
+                "breakdown": [],
+                "filter": {
+                  "filterType": "group",
+                  "logicalOperator": "AND",
+                  "conditions": []
+                }
+              },
+              "config": {
+                "promql_legend": "",
+                "layer_type": "scatter",
+                "weight_fixed": 1,
+                "limit": 0,
+                "min": 0,
+                "max": 100,
+                "time_shift": []
+              }
+            }
+          ],
+          "layout": {
+            "x": 0,
+            "y": 0,
+            "w": 96,
+            "h": 40,
+            "i": 2001
+          },
+          "htmlContent": "",
+          "markdownContent": ""
+        },
+        {
+          "id": "Panel_ID2002",
+          "type": "table",
+          "title": "Controls: uses and sessions, least used first",
+          "description": "Every control row in the catalog: clicks, changes, and submits on that label on that page. writes = y means it changes state. Controls with no visible text or aria-label cannot be told apart and are not in the catalog.",
+          "config": {
+            "show_legends": true,
+            "legends_position": null,
+            "unit": null,
+            "decimals": 0,
+            "line_thickness": 1.5,
+            "step_value": "0",
+            "top_results_others": false,
+            "axis_border_show": false,
+            "label_option": {
+              "rotate": 0
+            },
+            "show_symbol": false,
+            "line_interpolation": "smooth",
+            "legend_width": {
+              "unit": "px"
+            },
+            "base_map": {
+              "type": "osm"
+            },
+            "map_type": {
+              "type": "world"
+            },
+            "map_view": {
+              "zoom": 1,
+              "lat": 0,
+              "lng": 0
+            },
+            "map_symbol_style": {
+              "size": "by Value",
+              "size_by_value": {
+                "min": 1,
+                "max": 100
+              },
+              "size_fixed": 2
+            },
+            "drilldown": [],
+            "mark_line": [],
+            "override_config": [
+              {
+                "field": {
+                  "matchBy": "name",
+                  "value": "uses"
+                },
+                "config": [
+                  {
+                    "type": "field_type",
+                    "value": "text"
+                  },
+                  {
+                    "type": "alignment",
+                    "value": "right"
+                  }
+                ]
+              },
+              {
+                "field": {
+                  "matchBy": "name",
+                  "value": "sessions"
+                },
+                "config": [
+                  {
+                    "type": "field_type",
+                    "value": "text"
+                  },
+                  {
+                    "type": "alignment",
+                    "value": "right"
+                  }
+                ]
+              }
+            ],
+            "connect_nulls": false,
+            "no_value_replacement": "",
+            "wrap_table_cells": false,
+            "table_transpose": false,
+            "table_dynamic_columns": false,
+            "color": {
+              "mode": "palette-classic-by-series",
+              "fixedColor": [],
+              "seriesBy": "last",
+              "colorBySeries": []
+            },
+            "trellis": {
+              "layout": null,
+              "num_of_columns": 1,
+              "group_by_y_axis": false
+            },
+            "table_pagination": false
+          },
+          "queryType": "sql",
+          "queries": [
+            {
+              "query": "SELECT c.app, c.feature_name AS feature, c.element_label AS label, c.writes, count(s.span_id) AS uses, count(DISTINCT s.rum_session_id) AS sessions, to_char(to_timestamp_micros(max(s._timestamp)), '%Y-%m-%d %H:%M') AS last_used_utc, c.feature_id FROM enrich.feature_catalog c LEFT JOIN \"default\" s ON s.service_name = c.app AND s.event_type IN ('click', 'change', 'submit') AND s.target_text = c.element_label AND regexp_like(regexp_replace(s.page_path, '(.)/$', '$1'), c.path_pattern) WHERE c.kind = 'control' AND (c.app IN ($app) OR '_o2_all_' IN ($app)) GROUP BY c.app, c.feature_name, c.element_label, c.writes, c.feature_id ORDER BY uses ASC, c.app, feature",
+              "vrlFunctionQuery": "",
+              "customQuery": true,
+              "fields": {
+                "stream": "default",
+                "stream_type": "traces",
+                "x": [
+                  {
+                    "label": "",
+                    "alias": "app",
+                    "column": "app",
+                    "color": null,
+                    "isDerived": false,
+                    "havingConditions": [],
+                    "treatAsNonTimestamp": true,
+                    "type": "custom",
+                    "functionName": null,
+                    "args": []
+                  },
+                  {
+                    "label": "",
+                    "alias": "feature",
+                    "column": "feature",
+                    "color": null,
+                    "isDerived": false,
+                    "havingConditions": [],
+                    "treatAsNonTimestamp": true,
+                    "type": "custom",
+                    "functionName": null,
+                    "args": []
+                  },
+                  {
+                    "label": "",
+                    "alias": "label",
+                    "column": "label",
+                    "color": null,
+                    "isDerived": false,
+                    "havingConditions": [],
+                    "treatAsNonTimestamp": true,
+                    "type": "custom",
+                    "functionName": null,
+                    "args": []
+                  },
+                  {
+                    "label": "",
+                    "alias": "writes",
+                    "column": "writes",
+                    "color": null,
+                    "isDerived": false,
+                    "havingConditions": [],
+                    "treatAsNonTimestamp": true,
+                    "type": "custom",
+                    "functionName": null,
+                    "args": []
+                  },
+                  {
+                    "label": "",
+                    "alias": "last_used_utc",
+                    "column": "last_used_utc",
+                    "color": null,
+                    "isDerived": false,
+                    "havingConditions": [],
+                    "treatAsNonTimestamp": true,
+                    "type": "custom",
+                    "functionName": null,
+                    "args": []
+                  }
+                ],
+                "y": [
+                  {
+                    "label": "",
+                    "alias": "uses",
+                    "column": "uses",
+                    "color": null,
+                    "isDerived": false,
+                    "havingConditions": [],
+                    "treatAsNonTimestamp": true,
+                    "type": "custom",
+                    "functionName": null,
+                    "args": []
+                  },
+                  {
+                    "label": "",
+                    "alias": "sessions",
+                    "column": "sessions",
+                    "color": null,
+                    "isDerived": false,
+                    "havingConditions": [],
+                    "treatAsNonTimestamp": true,
+                    "type": "custom",
+                    "functionName": null,
+                    "args": []
+                  }
+                ],
+                "z": [],
+                "breakdown": [],
+                "filter": {
+                  "filterType": "group",
+                  "logicalOperator": "AND",
+                  "conditions": []
+                }
+              },
+              "config": {
+                "promql_legend": "",
+                "layer_type": "scatter",
+                "weight_fixed": 1,
+                "limit": 0,
+                "min": 0,
+                "max": 100,
+                "time_shift": []
+              }
+            }
+          ],
+          "layout": {
+            "x": 96,
+            "y": 0,
+            "w": 96,
+            "h": 40,
+            "i": 2002
+          },
+          "htmlContent": "",
+          "markdownContent": ""
+        },
+        {
+          "id": "Panel_ID2003",
+          "type": "table",
+          "title": "Pages: used vs never used, per app",
+          "description": "Cataloged pages per app, split by whether any session opened them.",
+          "config": {
+            "show_legends": true,
+            "legends_position": null,
+            "unit": null,
+            "decimals": 0,
+            "line_thickness": 1.5,
+            "step_value": "0",
+            "top_results_others": false,
+            "axis_border_show": false,
+            "label_option": {
+              "rotate": 0
+            },
+            "show_symbol": false,
+            "line_interpolation": "smooth",
+            "legend_width": {
+              "unit": "px"
+            },
+            "base_map": {
+              "type": "osm"
+            },
+            "map_type": {
+              "type": "world"
+            },
+            "map_view": {
+              "zoom": 1,
+              "lat": 0,
+              "lng": 0
+            },
+            "map_symbol_style": {
+              "size": "by Value",
+              "size_by_value": {
+                "min": 1,
+                "max": 100
+              },
+              "size_fixed": 2
+            },
+            "drilldown": [],
+            "mark_line": [],
+            "override_config": [
+              {
+                "field": {
+                  "matchBy": "name",
+                  "value": "cataloged"
+                },
+                "config": [
+                  {
+                    "type": "field_type",
+                    "value": "text"
+                  },
+                  {
+                    "type": "alignment",
+                    "value": "right"
+                  }
+                ]
+              },
+              {
+                "field": {
+                  "matchBy": "name",
+                  "value": "used"
+                },
+                "config": [
+                  {
+                    "type": "field_type",
+                    "value": "text"
+                  },
+                  {
+                    "type": "alignment",
+                    "value": "right"
+                  }
+                ]
+              },
+              {
+                "field": {
+                  "matchBy": "name",
+                  "value": "never_used"
+                },
+                "config": [
+                  {
+                    "type": "field_type",
+                    "value": "text"
+                  },
+                  {
+                    "type": "alignment",
+                    "value": "right"
+                  }
+                ]
+              }
+            ],
+            "connect_nulls": false,
+            "no_value_replacement": "",
+            "wrap_table_cells": false,
+            "table_transpose": false,
+            "table_dynamic_columns": false,
+            "color": {
+              "mode": "palette-classic-by-series",
+              "fixedColor": [],
+              "seriesBy": "last",
+              "colorBySeries": []
+            },
+            "trellis": {
+              "layout": null,
+              "num_of_columns": 1,
+              "group_by_y_axis": false
+            },
+            "table_pagination": false
+          },
+          "queryType": "sql",
+          "queries": [
+            {
+              "query": "SELECT app, count(*) AS cataloged, sum(CASE WHEN sessions > 0 THEN 1 ELSE 0 END) AS used, sum(CASE WHEN sessions = 0 THEN 1 ELSE 0 END) AS never_used FROM (SELECT c.app, c.feature_name AS feature, count(DISTINCT v.session_id) AS sessions, count(DISTINCT CASE WHEN v.spent >= 1e9 THEN v.view_id END) AS views, to_char(to_timestamp_micros(max(v.ts)), '%Y-%m-%d %H:%M') AS last_used_utc, c.feature_id FROM enrich.feature_catalog c LEFT JOIN (SELECT service, session_id, view_id, regexp_replace(regexp_replace(view_url, '^https?://[^/]+|[?][^#]*', '', 'g'), '(.)/(#|$)', '$1$2') AS path, max(view_time_spent) AS spent, min(_timestamp) AS ts FROM \"_rumdata\" WHERE type = 'view' AND (service IN ($app) OR '_o2_all_' IN ($app)) GROUP BY service, session_id, view_id, path) v ON v.service = c.app AND regexp_like(v.path, c.path_pattern) WHERE c.kind = 'page' AND (c.app IN ($app) OR '_o2_all_' IN ($app)) GROUP BY c.app, c.feature_name, c.feature_id) GROUP BY app ORDER BY app",
+              "vrlFunctionQuery": "",
+              "customQuery": true,
+              "fields": {
+                "stream": "_rumdata",
+                "stream_type": "logs",
+                "x": [
+                  {
+                    "label": "",
+                    "alias": "app",
+                    "column": "app",
+                    "color": null,
+                    "isDerived": false,
+                    "havingConditions": [],
+                    "treatAsNonTimestamp": true,
+                    "type": "custom",
+                    "functionName": null,
+                    "args": []
+                  }
+                ],
+                "y": [
+                  {
+                    "label": "",
+                    "alias": "cataloged",
+                    "column": "cataloged",
+                    "color": null,
+                    "isDerived": false,
+                    "havingConditions": [],
+                    "treatAsNonTimestamp": true,
+                    "type": "custom",
+                    "functionName": null,
+                    "args": []
+                  },
+                  {
+                    "label": "",
+                    "alias": "used",
+                    "column": "used",
+                    "color": null,
+                    "isDerived": false,
+                    "havingConditions": [],
+                    "treatAsNonTimestamp": true,
+                    "type": "custom",
+                    "functionName": null,
+                    "args": []
+                  },
+                  {
+                    "label": "",
+                    "alias": "never_used",
+                    "column": "never_used",
+                    "color": null,
+                    "isDerived": false,
+                    "havingConditions": [],
+                    "treatAsNonTimestamp": true,
+                    "type": "custom",
+                    "functionName": null,
+                    "args": []
+                  }
+                ],
+                "z": [],
+                "breakdown": [],
+                "filter": {
+                  "filterType": "group",
+                  "logicalOperator": "AND",
+                  "conditions": []
+                }
+              },
+              "config": {
+                "promql_legend": "",
+                "layer_type": "scatter",
+                "weight_fixed": 1,
+                "limit": 0,
+                "min": 0,
+                "max": 100,
+                "time_shift": []
+              }
+            }
+          ],
+          "layout": {
+            "x": 0,
+            "y": 40,
+            "w": 96,
+            "h": 12,
+            "i": 2003
+          },
+          "htmlContent": "",
+          "markdownContent": ""
+        },
+        {
+          "id": "Panel_ID2004",
+          "type": "table",
+          "title": "Controls: used vs never used, per app",
+          "description": "Cataloged controls per app, split by whether anyone used them.",
+          "config": {
+            "show_legends": true,
+            "legends_position": null,
+            "unit": null,
+            "decimals": 0,
+            "line_thickness": 1.5,
+            "step_value": "0",
+            "top_results_others": false,
+            "axis_border_show": false,
+            "label_option": {
+              "rotate": 0
+            },
+            "show_symbol": false,
+            "line_interpolation": "smooth",
+            "legend_width": {
+              "unit": "px"
+            },
+            "base_map": {
+              "type": "osm"
+            },
+            "map_type": {
+              "type": "world"
+            },
+            "map_view": {
+              "zoom": 1,
+              "lat": 0,
+              "lng": 0
+            },
+            "map_symbol_style": {
+              "size": "by Value",
+              "size_by_value": {
+                "min": 1,
+                "max": 100
+              },
+              "size_fixed": 2
+            },
+            "drilldown": [],
+            "mark_line": [],
+            "override_config": [
+              {
+                "field": {
+                  "matchBy": "name",
+                  "value": "cataloged"
+                },
+                "config": [
+                  {
+                    "type": "field_type",
+                    "value": "text"
+                  },
+                  {
+                    "type": "alignment",
+                    "value": "right"
+                  }
+                ]
+              },
+              {
+                "field": {
+                  "matchBy": "name",
+                  "value": "used"
+                },
+                "config": [
+                  {
+                    "type": "field_type",
+                    "value": "text"
+                  },
+                  {
+                    "type": "alignment",
+                    "value": "right"
+                  }
+                ]
+              },
+              {
+                "field": {
+                  "matchBy": "name",
+                  "value": "never_used"
+                },
+                "config": [
+                  {
+                    "type": "field_type",
+                    "value": "text"
+                  },
+                  {
+                    "type": "alignment",
+                    "value": "right"
+                  }
+                ]
+              }
+            ],
+            "connect_nulls": false,
+            "no_value_replacement": "",
+            "wrap_table_cells": false,
+            "table_transpose": false,
+            "table_dynamic_columns": false,
+            "color": {
+              "mode": "palette-classic-by-series",
+              "fixedColor": [],
+              "seriesBy": "last",
+              "colorBySeries": []
+            },
+            "trellis": {
+              "layout": null,
+              "num_of_columns": 1,
+              "group_by_y_axis": false
+            },
+            "table_pagination": false
+          },
+          "queryType": "sql",
+          "queries": [
+            {
+              "query": "SELECT app, count(*) AS cataloged, sum(CASE WHEN uses > 0 THEN 1 ELSE 0 END) AS used, sum(CASE WHEN uses = 0 THEN 1 ELSE 0 END) AS never_used FROM (SELECT c.app, c.feature_name AS feature, c.element_label AS label, c.writes, count(s.span_id) AS uses, count(DISTINCT s.rum_session_id) AS sessions, to_char(to_timestamp_micros(max(s._timestamp)), '%Y-%m-%d %H:%M') AS last_used_utc, c.feature_id FROM enrich.feature_catalog c LEFT JOIN \"default\" s ON s.service_name = c.app AND s.event_type IN ('click', 'change', 'submit') AND s.target_text = c.element_label AND regexp_like(regexp_replace(s.page_path, '(.)/$', '$1'), c.path_pattern) WHERE c.kind = 'control' AND (c.app IN ($app) OR '_o2_all_' IN ($app)) GROUP BY c.app, c.feature_name, c.element_label, c.writes, c.feature_id) GROUP BY app ORDER BY app",
+              "vrlFunctionQuery": "",
+              "customQuery": true,
+              "fields": {
+                "stream": "default",
+                "stream_type": "traces",
+                "x": [
+                  {
+                    "label": "",
+                    "alias": "app",
+                    "column": "app",
+                    "color": null,
+                    "isDerived": false,
+                    "havingConditions": [],
+                    "treatAsNonTimestamp": true,
+                    "type": "custom",
+                    "functionName": null,
+                    "args": []
+                  }
+                ],
+                "y": [
+                  {
+                    "label": "",
+                    "alias": "cataloged",
+                    "column": "cataloged",
+                    "color": null,
+                    "isDerived": false,
+                    "havingConditions": [],
+                    "treatAsNonTimestamp": true,
+                    "type": "custom",
+                    "functionName": null,
+                    "args": []
+                  },
+                  {
+                    "label": "",
+                    "alias": "used",
+                    "column": "used",
+                    "color": null,
+                    "isDerived": false,
+                    "havingConditions": [],
+                    "treatAsNonTimestamp": true,
+                    "type": "custom",
+                    "functionName": null,
+                    "args": []
+                  },
+                  {
+                    "label": "",
+                    "alias": "never_used",
+                    "column": "never_used",
+                    "color": null,
+                    "isDerived": false,
+                    "havingConditions": [],
+                    "treatAsNonTimestamp": true,
+                    "type": "custom",
+                    "functionName": null,
+                    "args": []
+                  }
+                ],
+                "z": [],
+                "breakdown": [],
+                "filter": {
+                  "filterType": "group",
+                  "logicalOperator": "AND",
+                  "conditions": []
+                }
+              },
+              "config": {
+                "promql_legend": "",
+                "layer_type": "scatter",
+                "weight_fixed": 1,
+                "limit": 0,
+                "min": 0,
+                "max": 100,
+                "time_shift": []
+              }
+            }
+          ],
+          "layout": {
+            "x": 96,
+            "y": 40,
+            "w": 96,
+            "h": 12,
+            "i": 2004
+          },
+          "htmlContent": "",
+          "markdownContent": ""
+        },
+        {
+          "id": "Panel_ID2005",
+          "type": "table",
+          "title": "Low use pages: opened in only 1 or 2 sessions",
+          "description": "One row per session. Click a row to open its replay.",
+          "config": {
+            "show_legends": true,
+            "legends_position": null,
+            "unit": null,
+            "decimals": 0,
+            "line_thickness": 1.5,
+            "step_value": "0",
+            "top_results_others": false,
+            "axis_border_show": false,
+            "label_option": {
+              "rotate": 0
+            },
+            "show_symbol": false,
+            "line_interpolation": "smooth",
+            "legend_width": {
+              "unit": "px"
+            },
+            "base_map": {
+              "type": "osm"
+            },
+            "map_type": {
+              "type": "world"
+            },
+            "map_view": {
+              "zoom": 1,
+              "lat": 0,
+              "lng": 0
+            },
+            "map_symbol_style": {
+              "size": "by Value",
+              "size_by_value": {
+                "min": 1,
+                "max": 100
+              },
+              "size_fixed": 2
+            },
+            "drilldown": [
+              {
+                "name": "Open replay",
+                "type": "byUrl",
+                "targetBlank": true,
+                "findBy": "name",
+                "data": {
+                  "url": "${o2_url}/web/rum/sessions/view/${row.field.session_id}?start_time=${row.field.start_us}&end_time=${row.field.end_us}&org_identifier=default",
+                  "folder": "",
+                  "dashboard": "",
+                  "tab": "",
+                  "passAllVariables": true,
+                  "variables": [],
+                  "logsMode": "auto",
+                  "logsQuery": ""
+                }
+              }
+            ],
+            "mark_line": [],
+            "override_config": [],
+            "connect_nulls": false,
+            "no_value_replacement": "",
+            "wrap_table_cells": false,
+            "table_transpose": false,
+            "table_dynamic_columns": false,
+            "color": {
+              "mode": "palette-classic-by-series",
+              "fixedColor": [],
+              "seriesBy": "last",
+              "colorBySeries": []
+            },
+            "trellis": {
+              "layout": null,
+              "num_of_columns": 1,
+              "group_by_y_axis": false
+            },
+            "table_pagination": false
+          },
+          "queryType": "sql",
+          "queries": [
+            {
+              "query": "SELECT f.app, f.feature, x.session_id, x.start_us AS started, x.start_us, x.end_us FROM (SELECT c.feature_id, c.app, c.feature_name AS feature FROM enrich.feature_catalog c JOIN (SELECT service, session_id, view_id, regexp_replace(regexp_replace(view_url, '^https?://[^/]+|[?][^#]*', '', 'g'), '(.)/(#|$)', '$1$2') AS path, max(view_time_spent) AS spent, min(_timestamp) AS ts FROM \"_rumdata\" WHERE type = 'view' AND (service IN ($app) OR '_o2_all_' IN ($app)) GROUP BY service, session_id, view_id, path) v ON v.service = c.app AND regexp_like(v.path, c.path_pattern) WHERE c.kind = 'page' GROUP BY c.feature_id, c.app, c.feature_name HAVING count(DISTINCT v.session_id) <= 2) f JOIN (SELECT DISTINCT c.feature_id, v.session_id FROM enrich.feature_catalog c JOIN (SELECT service, session_id, view_id, regexp_replace(regexp_replace(view_url, '^https?://[^/]+|[?][^#]*', '', 'g'), '(.)/(#|$)', '$1$2') AS path, max(view_time_spent) AS spent, min(_timestamp) AS ts FROM \"_rumdata\" WHERE type = 'view' AND (service IN ($app) OR '_o2_all_' IN ($app)) GROUP BY service, session_id, view_id, path) v ON v.service = c.app AND regexp_like(v.path, c.path_pattern) WHERE c.kind = 'page') fs ON fs.feature_id = f.feature_id JOIN (SELECT session_id, min(_timestamp) AS start_us, max(_timestamp) AS end_us FROM \"_rumdata\" WHERE (service IN ($app) OR '_o2_all_' IN ($app)) GROUP BY session_id) x ON x.session_id = fs.session_id ORDER BY f.app, f.feature, started",
+              "vrlFunctionQuery": "",
+              "customQuery": true,
+              "fields": {
+                "stream": "_rumdata",
+                "stream_type": "logs",
+                "x": [
+                  {
+                    "label": "",
+                    "alias": "app",
+                    "column": "app",
+                    "color": null,
+                    "isDerived": false,
+                    "havingConditions": [],
+                    "treatAsNonTimestamp": true,
+                    "type": "custom",
+                    "functionName": null,
+                    "args": []
+                  },
+                  {
+                    "label": "",
+                    "alias": "feature",
+                    "column": "feature",
+                    "color": null,
+                    "isDerived": false,
+                    "havingConditions": [],
+                    "treatAsNonTimestamp": true,
+                    "type": "custom",
+                    "functionName": null,
+                    "args": []
+                  },
+                  {
+                    "label": "",
+                    "alias": "session_id",
+                    "column": "session_id",
+                    "color": null,
+                    "isDerived": false,
+                    "havingConditions": [],
+                    "treatAsNonTimestamp": true,
+                    "type": "custom",
+                    "functionName": null,
+                    "args": []
+                  },
+                  {
+                    "label": "",
+                    "alias": "started",
+                    "column": "started",
+                    "color": null,
+                    "isDerived": false,
+                    "havingConditions": [],
+                    "treatAsNonTimestamp": false,
+                    "type": "custom",
+                    "functionName": null,
+                    "args": []
+                  }
+                ],
+                "y": [],
+                "z": [],
+                "breakdown": [],
+                "filter": {
+                  "filterType": "group",
+                  "logicalOperator": "AND",
+                  "conditions": []
+                }
+              },
+              "config": {
+                "promql_legend": "",
+                "layer_type": "scatter",
+                "weight_fixed": 1,
+                "limit": 0,
+                "min": 0,
+                "max": 100,
+                "time_shift": []
+              }
+            }
+          ],
+          "layout": {
+            "x": 0,
+            "y": 52,
+            "w": 96,
+            "h": 24,
+            "i": 2005
+          },
+          "htmlContent": "",
+          "markdownContent": ""
+        },
+        {
+          "id": "Panel_ID2006",
+          "type": "table",
+          "title": "Low use controls: used in only 1 or 2 sessions",
+          "description": "One row per session. Click a row to open its replay around the time the control was used.",
+          "config": {
+            "show_legends": true,
+            "legends_position": null,
+            "unit": null,
+            "decimals": 0,
+            "line_thickness": 1.5,
+            "step_value": "0",
+            "top_results_others": false,
+            "axis_border_show": false,
+            "label_option": {
+              "rotate": 0
+            },
+            "show_symbol": false,
+            "line_interpolation": "smooth",
+            "legend_width": {
+              "unit": "px"
+            },
+            "base_map": {
+              "type": "osm"
+            },
+            "map_type": {
+              "type": "world"
+            },
+            "map_view": {
+              "zoom": 1,
+              "lat": 0,
+              "lng": 0
+            },
+            "map_symbol_style": {
+              "size": "by Value",
+              "size_by_value": {
+                "min": 1,
+                "max": 100
+              },
+              "size_fixed": 2
+            },
+            "drilldown": [
+              {
+                "name": "Open replay",
+                "type": "byUrl",
+                "targetBlank": true,
+                "findBy": "name",
+                "data": {
+                  "url": "${o2_url}/web/rum/sessions/view/${row.field.session_id}?start_time=${row.field.start_us}&end_time=${row.field.end_us}&org_identifier=default",
+                  "folder": "",
+                  "dashboard": "",
+                  "tab": "",
+                  "passAllVariables": true,
+                  "variables": [],
+                  "logsMode": "auto",
+                  "logsQuery": ""
+                }
+              }
+            ],
+            "mark_line": [],
+            "override_config": [],
+            "connect_nulls": false,
+            "no_value_replacement": "",
+            "wrap_table_cells": false,
+            "table_transpose": false,
+            "table_dynamic_columns": false,
+            "color": {
+              "mode": "palette-classic-by-series",
+              "fixedColor": [],
+              "seriesBy": "last",
+              "colorBySeries": []
+            },
+            "trellis": {
+              "layout": null,
+              "num_of_columns": 1,
+              "group_by_y_axis": false
+            },
+            "table_pagination": false
+          },
+          "queryType": "sql",
+          "queries": [
+            {
+              "query": "SELECT f.app, f.feature, f.label, s.rum_session_id AS session_id, min(s._timestamp) AS used_at, min(s._timestamp) - 600000000 AS start_us, max(s._timestamp) + 600000000 AS end_us FROM (SELECT c.feature_id, c.app, c.feature_name AS feature, c.element_label AS label, c.path_pattern FROM enrich.feature_catalog c JOIN \"default\" s ON s.service_name = c.app AND s.event_type IN ('click', 'change', 'submit') AND s.target_text = c.element_label AND regexp_like(regexp_replace(s.page_path, '(.)/$', '$1'), c.path_pattern) WHERE c.kind = 'control' AND (c.app IN ($app) OR '_o2_all_' IN ($app)) GROUP BY c.feature_id, c.app, c.feature_name, c.element_label, c.path_pattern HAVING count(DISTINCT s.rum_session_id) <= 2) f JOIN \"default\" s ON s.service_name = f.app AND s.event_type IN ('click', 'change', 'submit') AND s.target_text = f.label AND regexp_like(regexp_replace(s.page_path, '(.)/$', '$1'), f.path_pattern) GROUP BY f.app, f.feature, f.label, s.rum_session_id ORDER BY f.app, f.feature, used_at",
+              "vrlFunctionQuery": "",
+              "customQuery": true,
+              "fields": {
+                "stream": "default",
+                "stream_type": "traces",
+                "x": [
+                  {
+                    "label": "",
+                    "alias": "app",
+                    "column": "app",
+                    "color": null,
+                    "isDerived": false,
+                    "havingConditions": [],
+                    "treatAsNonTimestamp": true,
+                    "type": "custom",
+                    "functionName": null,
+                    "args": []
+                  },
+                  {
+                    "label": "",
+                    "alias": "feature",
+                    "column": "feature",
+                    "color": null,
+                    "isDerived": false,
+                    "havingConditions": [],
+                    "treatAsNonTimestamp": true,
+                    "type": "custom",
+                    "functionName": null,
+                    "args": []
+                  },
+                  {
+                    "label": "",
+                    "alias": "label",
+                    "column": "label",
+                    "color": null,
+                    "isDerived": false,
+                    "havingConditions": [],
+                    "treatAsNonTimestamp": true,
+                    "type": "custom",
+                    "functionName": null,
+                    "args": []
+                  },
+                  {
+                    "label": "",
+                    "alias": "session_id",
+                    "column": "session_id",
+                    "color": null,
+                    "isDerived": false,
+                    "havingConditions": [],
+                    "treatAsNonTimestamp": true,
+                    "type": "custom",
+                    "functionName": null,
+                    "args": []
+                  },
+                  {
+                    "label": "",
+                    "alias": "used_at",
+                    "column": "used_at",
+                    "color": null,
+                    "isDerived": false,
+                    "havingConditions": [],
+                    "treatAsNonTimestamp": false,
+                    "type": "custom",
+                    "functionName": null,
+                    "args": []
+                  }
+                ],
+                "y": [],
+                "z": [],
+                "breakdown": [],
+                "filter": {
+                  "filterType": "group",
+                  "logicalOperator": "AND",
+                  "conditions": []
+                }
+              },
+              "config": {
+                "promql_legend": "",
+                "layer_type": "scatter",
+                "weight_fixed": 1,
+                "limit": 0,
+                "min": 0,
+                "max": 100,
+                "time_shift": []
+              }
+            }
+          ],
+          "layout": {
+            "x": 96,
+            "y": 52,
+            "w": 96,
+            "h": 24,
+            "i": 2006
+          },
+          "htmlContent": "",
+          "markdownContent": ""
+        },
+        {
+          "id": "Panel_ID2007",
+          "type": "table",
+          "title": "Pages seen that are not in the catalog",
+          "description": "Page paths (query string dropped) that matched no catalog row. Add rows for real features so they show in the inventory.",
+          "config": {
+            "show_legends": true,
+            "legends_position": null,
+            "unit": null,
+            "decimals": 0,
+            "line_thickness": 1.5,
+            "step_value": "0",
+            "top_results_others": false,
+            "axis_border_show": false,
+            "label_option": {
+              "rotate": 0
+            },
+            "show_symbol": false,
+            "line_interpolation": "smooth",
+            "legend_width": {
+              "unit": "px"
+            },
+            "base_map": {
+              "type": "osm"
+            },
+            "map_type": {
+              "type": "world"
+            },
+            "map_view": {
+              "zoom": 1,
+              "lat": 0,
+              "lng": 0
+            },
+            "map_symbol_style": {
+              "size": "by Value",
+              "size_by_value": {
+                "min": 1,
+                "max": 100
+              },
+              "size_fixed": 2
+            },
+            "drilldown": [],
+            "mark_line": [],
+            "override_config": [
+              {
+                "field": {
+                  "matchBy": "name",
+                  "value": "sessions"
+                },
+                "config": [
+                  {
+                    "type": "field_type",
+                    "value": "text"
+                  },
+                  {
+                    "type": "alignment",
+                    "value": "right"
+                  }
+                ]
+              },
+              {
+                "field": {
+                  "matchBy": "name",
+                  "value": "views"
+                },
+                "config": [
+                  {
+                    "type": "field_type",
+                    "value": "text"
+                  },
+                  {
+                    "type": "alignment",
+                    "value": "right"
+                  }
+                ]
+              }
+            ],
+            "connect_nulls": false,
+            "no_value_replacement": "",
+            "wrap_table_cells": false,
+            "table_transpose": false,
+            "table_dynamic_columns": false,
+            "color": {
+              "mode": "palette-classic-by-series",
+              "fixedColor": [],
+              "seriesBy": "last",
+              "colorBySeries": []
+            },
+            "trellis": {
+              "layout": null,
+              "num_of_columns": 1,
+              "group_by_y_axis": false
+            },
+            "table_pagination": false
+          },
+          "queryType": "sql",
+          "queries": [
+            {
+              "query": "SELECT v.service AS app, v.path AS page, count(DISTINCT v.session_id) AS sessions, count(DISTINCT v.view_id) AS views FROM (SELECT service, session_id, view_id, regexp_replace(regexp_replace(view_url, '^https?://[^/]+|[?][^#]*', '', 'g'), '(.)/(#|$)', '$1$2') AS path, max(view_time_spent) AS spent, min(_timestamp) AS ts FROM \"_rumdata\" WHERE type = 'view' AND (service IN ($app) OR '_o2_all_' IN ($app)) GROUP BY service, session_id, view_id, path) v LEFT JOIN enrich.feature_catalog c ON c.app = v.service AND c.kind = 'page' AND regexp_like(v.path, c.path_pattern) WHERE c.feature_id IS NULL AND v.spent >= 1e9 GROUP BY v.service, v.path ORDER BY sessions DESC, views DESC LIMIT 25",
+              "vrlFunctionQuery": "",
+              "customQuery": true,
+              "fields": {
+                "stream": "_rumdata",
+                "stream_type": "logs",
+                "x": [
+                  {
+                    "label": "",
+                    "alias": "app",
+                    "column": "app",
+                    "color": null,
+                    "isDerived": false,
+                    "havingConditions": [],
+                    "treatAsNonTimestamp": true,
+                    "type": "custom",
+                    "functionName": null,
+                    "args": []
+                  },
+                  {
+                    "label": "",
+                    "alias": "page",
+                    "column": "page",
+                    "color": null,
+                    "isDerived": false,
+                    "havingConditions": [],
+                    "treatAsNonTimestamp": true,
+                    "type": "custom",
+                    "functionName": null,
+                    "args": []
+                  }
+                ],
+                "y": [
+                  {
+                    "label": "",
+                    "alias": "sessions",
+                    "column": "sessions",
+                    "color": null,
+                    "isDerived": false,
+                    "havingConditions": [],
+                    "treatAsNonTimestamp": true,
+                    "type": "custom",
+                    "functionName": null,
+                    "args": []
+                  },
+                  {
+                    "label": "",
+                    "alias": "views",
+                    "column": "views",
+                    "color": null,
+                    "isDerived": false,
+                    "havingConditions": [],
+                    "treatAsNonTimestamp": true,
+                    "type": "custom",
+                    "functionName": null,
+                    "args": []
+                  }
+                ],
+                "z": [],
+                "breakdown": [],
+                "filter": {
+                  "filterType": "group",
+                  "logicalOperator": "AND",
+                  "conditions": []
+                }
+              },
+              "config": {
+                "promql_legend": "",
+                "layer_type": "scatter",
+                "weight_fixed": 1,
+                "limit": 0,
+                "min": 0,
+                "max": 100,
+                "time_shift": []
+              }
+            }
+          ],
+          "layout": {
+            "x": 0,
+            "y": 76,
+            "w": 96,
+            "h": 26,
+            "i": 2007
+          },
+          "htmlContent": "",
+          "markdownContent": ""
+        },
+        {
+          "id": "Panel_ID2008",
+          "type": "table",
+          "title": "Labelled controls used that are not in the catalog",
+          "description": "Clicked or changed controls with a label that matched no catalog row. Links and sidebar entries are left out; they show up as page views.",
+          "config": {
+            "show_legends": true,
+            "legends_position": null,
+            "unit": null,
+            "decimals": 0,
+            "line_thickness": 1.5,
+            "step_value": "0",
+            "top_results_others": false,
+            "axis_border_show": false,
+            "label_option": {
+              "rotate": 0
+            },
+            "show_symbol": false,
+            "line_interpolation": "smooth",
+            "legend_width": {
+              "unit": "px"
+            },
+            "base_map": {
+              "type": "osm"
+            },
+            "map_type": {
+              "type": "world"
+            },
+            "map_view": {
+              "zoom": 1,
+              "lat": 0,
+              "lng": 0
+            },
+            "map_symbol_style": {
+              "size": "by Value",
+              "size_by_value": {
+                "min": 1,
+                "max": 100
+              },
+              "size_fixed": 2
+            },
+            "drilldown": [],
+            "mark_line": [],
+            "override_config": [
+              {
+                "field": {
+                  "matchBy": "name",
+                  "value": "uses"
+                },
+                "config": [
+                  {
+                    "type": "field_type",
+                    "value": "text"
+                  },
+                  {
+                    "type": "alignment",
+                    "value": "right"
+                  }
+                ]
+              },
+              {
+                "field": {
+                  "matchBy": "name",
+                  "value": "sessions"
+                },
+                "config": [
+                  {
+                    "type": "field_type",
+                    "value": "text"
+                  },
+                  {
+                    "type": "alignment",
+                    "value": "right"
+                  }
+                ]
+              }
+            ],
+            "connect_nulls": false,
+            "no_value_replacement": "",
+            "wrap_table_cells": false,
+            "table_transpose": false,
+            "table_dynamic_columns": false,
+            "color": {
+              "mode": "palette-classic-by-series",
+              "fixedColor": [],
+              "seriesBy": "last",
+              "colorBySeries": []
+            },
+            "trellis": {
+              "layout": null,
+              "num_of_columns": 1,
+              "group_by_y_axis": false
+            },
+            "table_pagination": false
+          },
+          "queryType": "sql",
+          "queries": [
+            {
+              "query": "SELECT s.service_name AS app, regexp_replace(s.page_path, '(.)/$', '$1') AS page, s.target_text AS label, count(*) AS uses, count(DISTINCT s.rum_session_id) AS sessions FROM \"default\" s LEFT JOIN enrich.feature_catalog c ON c.app = s.service_name AND c.kind = 'control' AND s.target_text = c.element_label AND regexp_like(regexp_replace(s.page_path, '(.)/$', '$1'), c.path_pattern) WHERE c.feature_id IS NULL AND s.event_type IN ('click', 'change', 'submit') AND s.target_text <> '' AND s.target_element NOT IN ('A', 'BODY', 'HTML') AND s.target_xpath NOT LIKE '%/a/%' AND s.target_xpath NOT LIKE '%/nav/%' AND (s.service_name IN ($app) OR '_o2_all_' IN ($app)) GROUP BY s.service_name, regexp_replace(s.page_path, '(.)/$', '$1'), s.target_text ORDER BY sessions DESC, uses DESC LIMIT 25",
+              "vrlFunctionQuery": "",
+              "customQuery": true,
+              "fields": {
+                "stream": "default",
+                "stream_type": "traces",
+                "x": [
+                  {
+                    "label": "",
+                    "alias": "app",
+                    "column": "app",
+                    "color": null,
+                    "isDerived": false,
+                    "havingConditions": [],
+                    "treatAsNonTimestamp": true,
+                    "type": "custom",
+                    "functionName": null,
+                    "args": []
+                  },
+                  {
+                    "label": "",
+                    "alias": "page",
+                    "column": "page",
+                    "color": null,
+                    "isDerived": false,
+                    "havingConditions": [],
+                    "treatAsNonTimestamp": true,
+                    "type": "custom",
+                    "functionName": null,
+                    "args": []
+                  },
+                  {
+                    "label": "",
+                    "alias": "label",
+                    "column": "label",
+                    "color": null,
+                    "isDerived": false,
+                    "havingConditions": [],
+                    "treatAsNonTimestamp": true,
+                    "type": "custom",
+                    "functionName": null,
+                    "args": []
+                  }
+                ],
+                "y": [
+                  {
+                    "label": "",
+                    "alias": "uses",
+                    "column": "uses",
+                    "color": null,
+                    "isDerived": false,
+                    "havingConditions": [],
+                    "treatAsNonTimestamp": true,
+                    "type": "custom",
+                    "functionName": null,
+                    "args": []
+                  },
+                  {
+                    "label": "",
+                    "alias": "sessions",
+                    "column": "sessions",
+                    "color": null,
+                    "isDerived": false,
+                    "havingConditions": [],
+                    "treatAsNonTimestamp": true,
+                    "type": "custom",
+                    "functionName": null,
+                    "args": []
+                  }
+                ],
+                "z": [],
+                "breakdown": [],
+                "filter": {
+                  "filterType": "group",
+                  "logicalOperator": "AND",
+                  "conditions": []
+                }
+              },
+              "config": {
+                "promql_legend": "",
+                "layer_type": "scatter",
+                "weight_fixed": 1,
+                "limit": 0,
+                "min": 0,
+                "max": 100,
+                "time_shift": []
+              }
+            }
+          ],
+          "layout": {
+            "x": 96,
+            "y": 76,
+            "w": 96,
+            "h": 26,
+            "i": 2008
+          },
+          "htmlContent": "",
+          "markdownContent": ""
+        }
+      ]
+    }
+  ]
+}

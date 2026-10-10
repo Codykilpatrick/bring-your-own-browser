@@ -31,13 +31,14 @@ stringData:
       log_format usage escape=json '{"app":"$poc_app","host":"$host","method":"$request_method",'
         '"uri":"$uri","args":"$args","status":$status,"bytes":$body_bytes_sent,"upgrade":"$http_upgrade",'
         '"request_time":$request_time,"referer":"$http_referer","user_agent":"$http_user_agent",'
-        '"client":"$proxy_add_x_forwarded_for","upstream":"$proxy_host"}';
+        '"client":"$proxy_add_x_forwarded_for","upstream":"$proxy_host","content_type":"$sent_http_content_type"}';
       access_log syslog:server={{ .Release.Name }}-collector:5140,tag=nginx_access usage;
 
       server {
         listen 8080 default_server;
         set $poc_app "";
-        location = /healthz { access_log off; return 200; }
+        # Logged as app "_probe": the readiness probe every 10s is the proxy's liveness heartbeat.
+        location = /healthz { set $poc_app "_probe"; return 200; }
       }
       {{- range .Values.apps }}
 
@@ -88,7 +89,7 @@ stringData:
           proxy_hide_header Content-Security-Policy;
           {{- end }}
           sub_filter_once on;
-          sub_filter '</head>' '<script defer src="/__poc/poc.js" data-app="{{ .name }}" data-version="{{ .version }}" data-env="{{ $.Values.environment }}" data-org="{{ $o.org }}" data-privacy="{{ $o.privacyLevel }}"></script></head>';
+          sub_filter '</head>' '<script defer src="/__poc/poc.js" data-app="{{ .name }}" data-version="{{ .version }}" data-env="{{ $.Values.environment }}" data-org="{{ $o.org }}" data-privacy="{{ .privacy | default $o.privacyLevel }}"></script></head>';
         }
       }
       {{- end }}

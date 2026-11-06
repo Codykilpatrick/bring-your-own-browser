@@ -7,20 +7,20 @@ attach modes. Read this before picking a rollout approach for the real Swing and
 
 Two apps written to look like the real ones, with the kinds of controls legacy UIs have:
 
-- **Sonar Console** (`java-apps/sonar-console`): Swing, compiled for Java 6. Menus with
-  mnemonics, icon-only toolbar buttons (some with tooltips, some without), tabs, a
-  custom-painted panel with its own mouse handling, a table, slider, spinner, combo, text field,
-  modal dialogs, `JOptionPane`s, and an old AWT `Frame` with AWT `Button`/`Checkbox`. Logs with
-  log4j 1.2. Leaks 100 KB/s on purpose. Has a button that blocks the event thread for 3 s and a
-  menu item that throws on the event thread.
-- **Fire Control** (`java-apps/fire-control`): JavaFX 8 API. Same shape (menus, graphic-only
-  buttons, tabs, table with a context menu, list, check box, combo, slider, spinner, text
-  field), one extra `Stage` per engagement, an `Alert`, and a Swing `JDialog` opened from
-  JavaFX. Logs with `java.util.logging`. Same 3 s block and uncaught exception.
+- **Sonar Console**: Swing, compiled for Java 6. Menus with mnemonics, icon-only toolbar
+  buttons (some with tooltips, some without), tabs, a custom-painted panel with its own mouse
+  handling, a table, slider, spinner, combo, text field, modal dialogs, `JOptionPane`s, and an
+  old AWT `Frame` with AWT `Button`/`Checkbox`. Logs with log4j 1.2. Leaks 100 KB/s on purpose.
+  Has a button that blocks the event thread for 3 s and a menu item that throws on the event
+  thread.
+- **Fire Control**: JavaFX 8 API. Same shape (menus, graphic-only buttons, tabs, table with a
+  context menu, list, check box, combo, slider, spinner, text field), one extra `Stage` per
+  engagement, an `Alert`, and a Swing `JDialog` opened from JavaFX. Logs with
+  `java.util.logging`. Same 3 s block and uncaught exception.
 
-Each run is one container (Xvfb, fluxbox, noVNC) driven by an `xdotool` click list that uses
-about two thirds of the controls and deliberately skips the rest. `java-apps/run-matrix.sh`
-runs all of them and `java-apps/verify.sh` asks OpenObserve what arrived.
+Each run was one container (Xvfb, fluxbox, noVNC) driven by an `xdotool` click list that used
+about two thirds of the controls and deliberately skipped the rest. The apps and the click rig
+have been removed from the repo. The table below is the record of those runs.
 
 | Run (`deployment_environment_name`) | App | JDK | How the agent loaded |
 |---|---|---|---|

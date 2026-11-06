@@ -33,10 +33,6 @@ agent that sends the same shapes to the same collector.
   against the Zulu 6 `rt.jar` inside `Containerfile` so one jar runs on Java 6 through 21.
   `build.sh` writes `dist/ui-agent.jar` (~70 KB). `README.md` is the install card that ships in
   `out/ui-agent/`.
-- `java-apps/`: test rig, not shipped. `desktop/` (Xvfb + fluxbox + noVNC + xdotool base image),
-  `jdk/` (Zulu 6, 7, 8, 8+FX, Liberica 17, 17+OpenJFX images), `sonar-console/` (Swing, Java 6,
-  log4j 1.2), `fire-control/` (JavaFX 8 API, JUL, opens a Swing dialog), `scenarios/` (xdotool
-  click lists), `compose.yaml` (the attach matrix), `run-matrix.sh`, `verify.sh`.
 - `kind/`: Redpanda + Console v3.9.0 and Headlamp v0.44.0 for testing, plus `values.yaml` pointing
   the proxy at them. Not shipped. `docs/demo-walkthrough.md`: demo order and high-side click list.
   `docs/java-ui-findings.md`: what the Java agent matrix showed and the attach-mode ranking.
@@ -188,10 +184,8 @@ editing `build.sh`, the `image:` line in `chart/templates/`, the comment at the 
 `chart/values.yaml`, and the push loop in `README.md`. Rebuild the proxy image (and bump its
 tag) whenever `poc.js` changes.
 
-Test rig pins (`java-apps/`): Zulu 6 (`azul/zulu-openjdk-debian:6`), Zulu 7, Zulu 8, Zulu 8 FX
-`8.96.0.205-ca-fx-jdk8.0.504`, Liberica 17 (`bellsoft/liberica-openjdk-debian:17`), OpenJFX
-`17.0.13` jars, log4j `1.2.17`, OpenTelemetry Java agent `2.33.1` (coexistence run only).
 The collector's `otlp_http` exporter is the 0.161.0 name; older contribs call it `otlphttp`.
+The agent was checked beside OpenTelemetry Java agent `2.33.1`.
 
 ## Testing locally with kind
 
@@ -229,27 +223,8 @@ file, `curl -u ... -X POST "http://localhost:5080/api/default/dashboards?folder=
 `/api/default/_search?type=<stream_type>` with `$app` replaced by `'_o2_all_'` is the quickest
 panel check.
 
-### Java apps in kind
-
-The Java test apps run in Docker Compose on the Mac and post to the kind collector through the
-proxy's 4318 port-forward (`host.docker.internal` inside the containers):
-
-```bash
-(cd java-apps && ./build.sh)                      # desktop and JDK images, both apps, the agent
-kubectl -n otel-poc port-forward --address 0.0.0.0 svc/otel-poc-proxy 4318:4318 &
-(cd java-apps && ./run-matrix.sh --with-otel)     # up, click through every app, verify.sh
-```
-
-`run-matrix.sh` ends with `ok` and one `ok <run> <check>` line per check (66 with `--with-otel`),
-or `FAIL: n checks`. Watch any run live at `http://localhost:608N` (noVNC; ports in
-`compose.yaml`). Scenario and agent logs land in `/tmp/java-apps-matrix/`. `docker compose
---profile otel down` stops everything. All images are `--platform linux/amd64` (OrbStack runs them
-under Rosetta); `--platform` is also needed on `docker build` for local `FROM` images, or BuildKit
-tries to pull them from Docker Hub.
-
-The apps dump the screen position of every control to `/tmp/<app>-bounds.sh` once a second (the
-scenarios source it after each tab change), so click lists never hard-code coordinates. Menus are
-opened with the mouse on both toolkits; see the comments at the top of each scenario for why.
+A Java desktop agent on this Mac reaches that collector with
+`kubectl -n otel-poc port-forward --address 0.0.0.0 svc/otel-poc-proxy 4318:4318`.
 
 ## Usage dashboards
 

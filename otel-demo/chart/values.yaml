@@ -97,6 +97,10 @@ collector:
 
 proxy:
   replicas: 1
+  # Port on the proxy that forwards OTLP/HTTP (/v1/traces, /v1/logs, /v1/metrics) to the Collector,
+  # for Java desktop apps running ui-agent. They point UI_AGENT_ENDPOINT at
+  # http://<proxy IP or host>:4318. Empty turns it off.
+  otlpPort: 4318
   # Multus networks, so browsers can reach the proxy directly.
   networkAttachments:
     enabled: false

@@ -18,5 +18,11 @@ docker save --platform "$PLATFORM" -o out/otel-poc-images.tar \
 
 cp -R chart out/chart
 cp README.md out/
-(cd out && find otel-poc-images.tar chart README.md -type f -exec sha256sum {} + > SHA256SUMS)
+
+# Java desktop agent: one jar for Java 6+, plus its install card.
+(cd ui-agent && ./build.sh)
+mkdir -p out/ui-agent
+cp ui-agent/dist/ui-agent.jar ui-agent/README.md out/ui-agent/
+
+(cd out && find otel-poc-images.tar chart README.md ui-agent -type f -exec sha256sum {} + > SHA256SUMS)
 ls -lh out

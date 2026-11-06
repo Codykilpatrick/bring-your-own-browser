@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Writes the three usage dashboards to chart/files/dashboards/. Connected side only.
+"""Writes the usage dashboards and the Java app health dashboard to chart/files/dashboards/.
+Connected side only.
 
 The panel boilerplate is copied from chart/files/dashboard.json so the files match what
 OpenObserve v1.0.4 exports. Edit the SQL here and rerun, rather than editing the JSON.
@@ -8,6 +9,9 @@ Rules every query follows (see CLAUDE.md, "Usage dashboards"):
 - One stream type per query. A catalog join next to a cross-type stream drops rows silently.
 - Catalog joins need the equi key (app) in ON; a regexp-only ON clause returns nothing.
 - Page paths: origin, query string, and trailing slash dropped, hash kept. Spans have no hash.
+- Views come from two logs streams: _rumdata (browser script) and ui_views (Java ui-agent). Both
+  carry the same columns, so a UNION ALL inside the VIEWS subquery feeds every page panel. Java
+  paths look like /Window title/Tab and never have an origin, query, or hash.
 """
 import copy, json, sys
 from pathlib import Path
@@ -24,10 +28,15 @@ def APP(col):
 PATH = r"regexp_replace(regexp_replace(view_url, '^https?://[^/]+|[?][^#]*', '', 'g'), '(.)/(#|$)', '$1$2')"
 CPATH = r"regexp_replace(s.page_path, '(.)/$', '$1')"
 INTERACTION = "s.event_type IN ('click', 'change', 'submit')"
-# One row per RUM view. RUM re-sends a view as it updates, so group by view_id.
+# Browser views and Java window/tab views carry the same columns. OpenObserve fails the whole query
+# when a stream in a UNION does not exist, so a site with no Java agent reporting yet generates
+# with --web-only (reads _rumdata alone) until the first agent row lands.
+VIEW_COLS = 'service, session_id, view_id, view_url, view_time_spent, view_loading_type, _timestamp'
+VIEW_STREAMS = ['_rumdata'] if '--web-only' in sys.argv else ['_rumdata', 'ui_views']
+VIEW_ROWS = '(' + ' UNION ALL '.join(f'SELECT {VIEW_COLS} FROM "{s}" WHERE type = \'view\' AND {APP("service")}' for s in VIEW_STREAMS) + ')'
+# One row per view. RUM (and the Java agent) re-send a view as it updates, so group by view_id.
 VIEWS = (f'(SELECT service, session_id, view_id, {PATH} AS path, max(view_time_spent) AS spent, '
-         f'min(_timestamp) AS ts FROM "_rumdata" WHERE type = \'view\' AND {APP("service")} '
-         'GROUP BY service, session_id, view_id, path)')
+         f'min(_timestamp) AS ts FROM {VIEW_ROWS} GROUP BY service, session_id, view_id, path)')
 # Redirect hops (Console's /topics -> /topics/) last well under a second; don't count them as views.
 REAL_VIEW = 'v.spent >= 1e9'
 PAGE_JOIN = 'v.service = c.app AND regexp_like(v.path, c.path_pattern)'
@@ -48,8 +57,9 @@ INV_CTRL = (f'SELECT c.app, c.feature_name AS feature, c.element_label AS label,
             f'count(DISTINCT s.rum_session_id) AS sessions, {utc("max(s._timestamp)")} AS last_used_utc, c.feature_id '
             f'FROM {CATALOG} c LEFT JOIN "default" s ON {CTRL_JOIN} '
             f"WHERE c.kind = 'control' AND {APP('c.app')} GROUP BY c.app, c.feature_name, c.element_label, c.writes, c.feature_id")
-SESSION_BOUNDS = (f'(SELECT session_id, min(_timestamp) AS start_us, max(_timestamp) AS end_us FROM "_rumdata" '
-                  f'WHERE {APP("service")} GROUP BY session_id)')
+# Java sessions are here too so low-use pages list them; their replay link opens nothing (no RUM).
+SESSION_BOUNDS = (f'(SELECT session_id, min(_timestamp) AS start_us, max(_timestamp) AS end_us FROM {VIEW_ROWS} '
+                  f'GROUP BY session_id)')
 
 
 def hours(ts):
@@ -74,7 +84,7 @@ def panel(n, kind, title, desc, sql, stream, layout, text=(), nums=(), times=(),
     p['layout'] = dict(zip('xywh', layout), i=n)
     q = p['queries'][0]
     q['query'] = ' '.join(sql.split())
-    stream_type = 'traces' if stream == 'default' else 'logs'
+    stream_type = 'traces' if stream == 'default' else 'metrics' if stream.startswith(METRIC_PREFIXES) else 'logs'
     q['fields'].update(stream=stream, stream_type=stream_type)
     cfg = p['config']
     cfg.update(drilldown=REPLAY if replay else [], override_config=[], decimals=0)
@@ -95,8 +105,14 @@ def panel(n, kind, title, desc, sql, stream, layout, text=(), nums=(), times=(),
     return p
 
 
-def dashboard(slug, title, desc, panels):
+def dashboard(slug, title, desc, panels, app_source=('logs', 'nginx_access', 'app')):
+    """app_source: stream type, stream, and field the $app dropdown lists. The usage dashboards
+    list apps behind the proxy (nginx_access); Java apps only report to the collector, so the
+    health dashboard lists them from java_logs."""
     d = {k: copy.deepcopy(BASE[k]) for k in ('version', 'role', 'owner', 'created', 'variables')}
+    for v in d['variables']['list']:
+        if v['name'] == 'app':
+            v['query_data'].update(stream_type=app_source[0], stream=app_source[1], field=app_source[2])
     d.update(dashboardId=slug, title=title, description=desc,
              defaultDatetimeDuration={'type': 'relative', 'relativeTimePeriod': '7d', 'startTime': None, 'endTime': None},
              tabs=[{'tabId': 'default', 'name': 'Default', 'panels': panels}])
@@ -104,6 +120,7 @@ def dashboard(slug, title, desc, panels):
 
 
 W = 192  # grid width
+METRIC_PREFIXES = ('jvm_', 'process_', 'ui_event_thread_', 'ui_agent_')
 
 
 def feature_inventory():
@@ -128,7 +145,7 @@ def feature_inventory():
     uncat_ctrls = (f'SELECT s.service_name AS app, {CPATH} AS page, s.target_text AS label, count(*) AS uses, count(DISTINCT s.rum_session_id) AS sessions '
                    f"FROM \"default\" s LEFT JOIN {CATALOG} c ON c.app = s.service_name AND c.kind = 'control' AND s.target_text = c.element_label "
                    f'AND regexp_like({CPATH}, c.path_pattern) '
-                   f"WHERE c.feature_id IS NULL AND {INTERACTION} AND s.target_text <> '' AND s.target_element NOT IN ('A', 'BODY', 'HTML') "
+                   f"WHERE c.feature_id IS NULL AND {INTERACTION} AND s.target_text <> '' AND s.target_element NOT IN ('A', 'BODY', 'HTML', 'JTabbedPane', 'TabPane') "
                    f"AND s.target_xpath NOT LIKE '%/a/%' AND s.target_xpath NOT LIKE '%/nav/%' "
                    f'AND {APP("s.service_name")} GROUP BY s.service_name, {CPATH}, s.target_text ORDER BY sessions DESC, uses DESC LIMIT 25')
     return dashboard('feature-inventory', 'Feature inventory',
@@ -156,7 +173,7 @@ def feature_inventory():
               'Page paths (query string dropped) that matched no catalog row. Add rows for real features so they show in the inventory.',
               uncat_pages, '_rumdata', (0, 76, 96, 26), text=('app', 'page'), nums=('sessions', 'views')),
         panel(2008, 'table', 'Labelled controls used that are not in the catalog',
-              'Clicked or changed controls with a label that matched no catalog row. Links and sidebar entries are left out; they show up as page views.',
+              'Clicked or changed controls with a label that matched no catalog row. Links, sidebar entries, and Java tab headers are left out; they show up as page views.',
               uncat_ctrls, 'default', (96, 76, 96, 26), text=('app', 'page', 'label'), nums=('uses', 'sessions')),
     ])
 
@@ -206,10 +223,15 @@ def collection_coverage():
                  f"LEFT JOIN (SELECT service AS app, count(DISTINCT CASE WHEN view_loading_type = 'initial_load' THEN view_id END) AS initial_loads, "
                  f"count(DISTINCT session_id) AS sessions FROM \"_rumdata\" WHERE type = 'view' AND {APP('service')} GROUP BY service) r "
                  f'ON r.app = n.app ORDER BY n.app')
+    # Browser errors only. Java uncaught exceptions are on the Java app health dashboard: a query fails
+    # outright when one stream lacks a column, and ui_views has no error columns until the first exception.
     errors = (f"SELECT service AS app, CASE WHEN error_stack LIKE '%/__poc/%' THEN 'poc.js' ELSE 'app' END AS error_from, "
               f'substr(error_message, 1, 140) AS message, count(*) AS errors, count(DISTINCT session_id) AS sessions '
               f"FROM \"_rumdata\" WHERE type = 'error' AND {APP('service')} GROUP BY 1, 2, 3 "
               f"ORDER BY error_from DESC, errors DESC LIMIT 30")
+    agents = (f'SELECT service_name AS app, deployment_environment_name AS env, host_name AS host, process_runtime_version AS java, '
+              f"{hours('_timestamp')} AS hours_reporting, min(_timestamp) AS first_seen, max(_timestamp) AS last_seen "
+              f'FROM "process_uptime" WHERE {APP("service_name")} GROUP BY app, env, host, java ORDER BY app, env, host')
     traffic = (f'SELECT t.app, t.hours_with_traffic, h.hours_proxy_up, t.first_request, t.last_request FROM '
                f"(SELECT app, {hours('_timestamp')} AS hours_with_traffic, min(_timestamp) AS first_request, max(_timestamp) AS last_request "
                f"FROM \"nginx_access\" WHERE app NOT IN ('', '_probe') AND {APP('app')} GROUP BY app) t "
@@ -228,7 +250,7 @@ def collection_coverage():
               'nginx_access', (0, 0, 64, 18)),
         panel(4002, 'bar', 'Browser events per hour (_rumdata)', 'Views, errors, and resource timings sent by the injected script.',
               per_hour('_rumdata', 'service'), '_rumdata', (64, 0, 64, 18)),
-        panel(4003, 'bar', 'Spans per hour (traces)', 'Interaction, page load, and request spans sent by the injected script.',
+        panel(4003, 'bar', 'Spans per hour (traces)', 'Interaction, page load, and request spans sent by the injected script and the Java ui-agent.',
               per_hour('default', 'service_name'), 'default', (128, 0, 64, 18)),
         panel(4004, 'table', 'Is the script reaching browsers?',
               'HTML pages the proxy served (status 200) vs. page loads the injected script reported. Close to 100 means the script ran. '
@@ -242,15 +264,77 @@ def collection_coverage():
               nums=('hours_with_traffic', 'hours_proxy_up')),
         panel(4006, 'table', 'Browser errors: tracking script vs. app',
               'error_from = poc.js are errors in the injected tracking script (/__poc/); these can mean usage went unrecorded. '
-              'error_from = app are the app\'s own errors.',
+              'error_from = app are the app\'s own errors. Java apps: see Uncaught exceptions on the Java app health dashboard.',
               errors, '_rumdata', (0, 32, W, 22), text=('app', 'error_from', 'message'), nums=('errors', 'sessions')),
+        panel(4007, 'bar', 'Java agent events per hour (ui_views)', 'Window and tab views and uncaught exceptions sent by the Java ui-agent.',
+              per_hour('ui_views', 'service'), 'ui_views', (0, 54, 96, 18)),
+        panel(4008, 'table', 'Java agents reporting',
+              'One row per Java app, environment, and host that sent health metrics. hours_reporting counts hours with at least one sample '
+              '(the agent sends one every 10 seconds while the app runs). A gap here means the app was down or the agent was not loaded, '
+              'so a zero on Feature inventory for that app is not usage data.',
+              agents, 'process_uptime', (96, 54, 96, 18), text=('app', 'env', 'host', 'java'), times=('first_seen', 'last_seen'),
+              nums=('hours_reporting',)),
     ])
 
 
+def java_app_health():
+    """JVM health and application logs from the Java ui-agent. Metrics streams are one per metric
+    name; each panel reads one stream. The $app dropdown lists apps from java_logs."""
+    app_env = "concat(service_name, ' @ ', deployment_environment_name)"
+    series = lambda stream, agg, where='', step='5 minute': (
+        f'SELECT histogram(_timestamp, \'{step}\') AS "x_axis_1", {app_env} AS "breakdown_1", {agg} AS "y_axis_1" '
+        f'FROM "{stream}" WHERE {where}{APP("service_name")} GROUP BY x_axis_1, breakdown_1 ORDER BY x_axis_1 ASC')
+    freezes = (f'SELECT service_name AS app, deployment_environment_name AS env, _timestamp AS at, body AS what, '
+               f"substr(regexp_replace(exception_stacktrace, '^[^\\n]*\\n\\s*', ''), 1, 160) AS top_frame "
+               f"FROM \"java_logs\" WHERE kind = 'freeze' AND {APP('service_name')} ORDER BY _timestamp DESC LIMIT 50")
+    uncaught = (f'SELECT application_id AS app, env, view_url AS page, error_source AS thread, substr(error_message, 1, 140) AS message, '
+                f'count(*) AS errors, count(DISTINCT session_id) AS sessions, {utc("max(_timestamp)")} AS last_seen_utc '
+                f"FROM \"ui_views\" WHERE type = 'error' AND {APP('service')} GROUP BY app, env, page, thread, message "
+                f'ORDER BY errors DESC LIMIT 30')
+    log_errors = (f'SELECT service_name AS app, severity, kind AS source, logger, substr(body, 1, 140) AS message, count(*) AS n, '
+                  f'{utc("max(_timestamp)")} AS last_seen_utc FROM "java_logs" '
+                  f"WHERE severity IN ('ERROR', 'WARN') AND kind <> 'freeze_end' AND {APP('service_name')} "
+                  f'GROUP BY app, severity, source, logger, message ORDER BY n DESC LIMIT 30')
+    sources = (f'SELECT service_name AS app, deployment_environment_name AS env, kind AS source, count(*) AS rows, '
+               f"count(*) FILTER (WHERE severity = 'ERROR') AS errors, count(*) FILTER (WHERE severity = 'WARN') AS warnings "
+               f'FROM "java_logs" WHERE {APP("service_name")} GROUP BY app, env, source ORDER BY app, env, source')
+    return dashboard('java-app-health', 'Java app health',
+                     'JVM health, event thread freezes, uncaught exceptions, and application logs from the Java ui-agent. '
+                     'One line per app and environment.', [
+        panel(5001, 'line', 'Heap used (bytes)', 'jvm.memory.used for the heap, max per 5 minutes. A line that only goes up is a leak candidate.',
+              series('jvm_memory_used', 'max(value)', "jvm_memory_type = 'heap' AND "), 'jvm_memory_used', (0, 0, 96, 18)),
+        panel(5002, 'line', 'Process CPU (0 to 1)', 'process.cpu.utilization sampled every 10 seconds, max per 5 minutes.',
+              series('process_cpu_utilization', 'max(value)'), 'process_cpu_utilization', (96, 0, 96, 18)),
+        panel(5003, 'line', 'Event thread worst latency (ms)',
+              'Longest time a 1 second ping waited for the Swing or JavaFX event thread, per 5 minutes. Above 500 ms the UI visibly stalls.',
+              series('ui_event_thread_latency_max', 'max(value)'), 'ui_event_thread_latency_max', (0, 18, 96, 18)),
+        panel(5004, 'line', 'Live threads', 'jvm.thread.count, max per 5 minutes. A count that climbs with use is a thread leak.',
+              series('jvm_thread_count', 'max(value)'), 'jvm_thread_count', (96, 18, 96, 18)),
+        panel(5005, 'bar', 'Event thread freezes per hour', 'Times the event thread was blocked for longer than the freeze threshold (500 ms).',
+              series('java_logs', 'count(*)', "kind = 'freeze' AND ", '1 hour'), 'java_logs', (0, 36, 96, 18)),
+        panel(5006, 'bar', 'Log errors and warnings per hour', 'Application log records at ERROR or WARN (JUL, log4j, logback, and stderr).',
+              series('java_logs', 'count(*)', "severity IN ('ERROR', 'WARN') AND kind <> 'freeze' AND kind <> 'freeze_end' AND ", '1 hour'),
+              'java_logs', (96, 36, 96, 18)),
+        panel(5007, 'table', 'Recent freezes: what the event thread was doing',
+              'One row per freeze with the top frame of the event thread stack. The frame names the code that blocked the UI.',
+              freezes, 'java_logs', (0, 54, W, 22), text=('app', 'env', 'what', 'top_frame'), times=('at',)),
+        panel(5008, 'table', 'Uncaught exceptions', 'Exceptions that reached the default handler, grouped by app, page, and message.',
+              uncaught, 'ui_views', (0, 76, W, 22), text=('app', 'env', 'page', 'thread', 'message', 'last_seen_utc'), nums=('errors', 'sessions')),
+        panel(5009, 'table', 'Top log errors and warnings', 'Grouped by logger and message. source = stderr means it was printed, not logged.',
+              log_errors, 'java_logs', (0, 98, 128, 22), text=('app', 'severity', 'source', 'logger', 'message', 'last_seen_utc'), nums=('n',)),
+        panel(5010, 'table', 'Log sources captured per app',
+              'Where the log rows came from: app_log (JUL, log4j, logback), stdout, stderr, freeze, uncaught_exception. '
+              'An app with only stdout rows is not using a logging framework the agent hooks.',
+              sources, 'java_logs', (128, 98, 64, 22), text=('app', 'env', 'source'), nums=('rows', 'errors', 'warnings')),
+    ], app_source=('logs', 'java_logs', 'service_name'))
+
+
 if __name__ == '__main__':
+    # --web-only: page panels read _rumdata alone (no ui_views stream yet). --sql: print each panel's query.
     out = ROOT / 'chart/files/dashboards'
     out.mkdir(exist_ok=True)
-    for name, d in [('feature-inventory', feature_inventory()), ('usage-summary', usage_summary()), ('collection-coverage', collection_coverage())]:
+    for name, d in [('feature-inventory', feature_inventory()), ('usage-summary', usage_summary()), ('collection-coverage', collection_coverage()),
+                    ('java-app-health', java_app_health())]:
         (out / f'{name}.json').write_text(json.dumps(d, indent=2) + '\n')
         if '--sql' in sys.argv:
             for p in d['tabs'][0]['panels']:

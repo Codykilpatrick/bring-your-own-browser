@@ -1,3 +1,4 @@
+{{- $o2 := .Values.openobserve.url | default (printf "http://%s-openobserve:5080" .Release.Name) -}}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -5,6 +6,7 @@ metadata:
 data:
   config.yaml: |
     receivers:
+      # Browsers (through the proxy) and Java desktop agents (ui-agent) both send OTLP/HTTP here.
       otlp:
         protocols:
           http: { endpoint: 0.0.0.0:4318 }
@@ -21,26 +23,70 @@ data:
 
     processors:
       batch: {}
+      # When the official OpenTelemetry Java agent runs next to ui-agent it traces ui-agent's own
+      # export POSTs (one span per batch). Drop any client span whose URL is an OTLP endpoint.
+      filter/self_export:
+        traces:
+          span:
+            - 'IsMatch(attributes["url.full"], ".*/v1/(traces|logs|metrics)$")'
+      # ui-agent sends two kinds of log record. Views and errors carry a "type" attribute and use the
+      # RUM column names, so they go to ui_views next to _rumdata. Everything else is an application
+      # log line, a freeze report, or stdout and goes to java_logs.
+      filter/views:
+        logs:
+          log_record:
+            - 'attributes["type"] == nil'
+      filter/app_logs:
+        logs:
+          log_record:
+            - 'attributes["type"] != nil'
 
     exporters:
       otlp_http/traces:
-        endpoint: {{ .Values.openobserve.url | default (printf "http://%s-openobserve:5080" .Release.Name) }}/api/{{ .Values.openobserve.org }}
+        endpoint: {{ $o2 }}/api/{{ .Values.openobserve.org }}
         headers:
           Authorization: Basic ${env:O2_BASIC_AUTH}
           stream-name: default
       otlp_http/access:
-        endpoint: {{ .Values.openobserve.url | default (printf "http://%s-openobserve:5080" .Release.Name) }}/api/{{ .Values.openobserve.org }}
+        endpoint: {{ $o2 }}/api/{{ .Values.openobserve.org }}
         headers:
           Authorization: Basic ${env:O2_BASIC_AUTH}
           stream-name: nginx_access
+      otlp_http/views:
+        endpoint: {{ $o2 }}/api/{{ .Values.openobserve.org }}
+        headers:
+          Authorization: Basic ${env:O2_BASIC_AUTH}
+          stream-name: ui_views
+      otlp_http/java_logs:
+        endpoint: {{ $o2 }}/api/{{ .Values.openobserve.org }}
+        headers:
+          Authorization: Basic ${env:O2_BASIC_AUTH}
+          stream-name: java_logs
+      # Metric streams are named after the metric (jvm_memory_used, ui_event_thread_freezes).
+      otlp_http/metrics:
+        endpoint: {{ $o2 }}/api/{{ .Values.openobserve.org }}
+        headers:
+          Authorization: Basic ${env:O2_BASIC_AUTH}
 
     service:
       pipelines:
         traces:
           receivers: [otlp]
-          processors: [batch]
+          processors: [filter/self_export, batch]
           exporters: [otlp_http/traces]
         logs:
           receivers: [syslog/nginx]
           processors: [batch]
           exporters: [otlp_http/access]
+        logs/views:
+          receivers: [otlp]
+          processors: [filter/views, batch]
+          exporters: [otlp_http/views]
+        logs/java:
+          receivers: [otlp]
+          processors: [filter/app_logs, batch]
+          exporters: [otlp_http/java_logs]
+        metrics:
+          receivers: [otlp]
+          processors: [batch]
+          exporters: [otlp_http/metrics]

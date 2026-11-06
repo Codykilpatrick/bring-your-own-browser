@@ -40,6 +40,18 @@ stringData:
         # Logged as app "_probe": the readiness probe every 10s is the proxy's liveness heartbeat.
         location = /healthz { set $poc_app "_probe"; return 200; }
       }
+      {{- with .Values.proxy.otlpPort }}
+
+      # OTLP/HTTP for Java desktop agents (ui-agent). Lives on the proxy so a workstation can reach
+      # the Collector at the proxy's Multus IP with no second network attachment.
+      server {
+        listen {{ . }};
+        set $poc_app "_otlp";
+        access_log off;
+        location /v1/ { proxy_pass http://{{ $.Release.Name }}-collector:4318; }
+        location / { return 404; }
+      }
+      {{- end }}
       {{- range .Values.apps }}
 
       server {

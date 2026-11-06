@@ -6,6 +6,9 @@ spec:
   selector: { app: {{ .Release.Name }}-proxy }
   ports:
     - { name: http, port: 80, targetPort: 8080 }
+    {{- with .Values.proxy.otlpPort }}
+    - { name: otlp, port: {{ . }}, targetPort: {{ . }} }
+    {{- end }}
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -37,6 +40,9 @@ spec:
           securityContext: {{- toYaml .Values.containerSecurityContext | nindent 12 }}
           ports:
             - { containerPort: 8080 }
+            {{- with .Values.proxy.otlpPort }}
+            - { containerPort: {{ . }} }
+            {{- end }}
             {{- range .Values.apps }}
             {{- with .port }}
             - { containerPort: {{ . }} }

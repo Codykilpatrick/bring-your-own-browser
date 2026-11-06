@@ -337,7 +337,7 @@
           "id": "Panel_ID4003",
           "type": "bar",
           "title": "Spans per hour (traces)",
-          "description": "Interaction, page load, and request spans sent by the injected script.",
+          "description": "Interaction, page load, and request spans sent by the injected script and the Java ui-agent.",
           "config": {
             "show_legends": true,
             "legends_position": null,
@@ -903,7 +903,7 @@
           "id": "Panel_ID4006",
           "type": "table",
           "title": "Browser errors: tracking script vs. app",
-          "description": "error_from = poc.js are errors in the injected tracking script (/__poc/); these can mean usage went unrecorded. error_from = app are the app's own errors.",
+          "description": "error_from = poc.js are errors in the injected tracking script (/__poc/); these can mean usage went unrecorded. error_from = app are the app's own errors. Java apps: see Uncaught exceptions on the Java app health dashboard.",
           "config": {
             "show_legends": true,
             "legends_position": null,
@@ -1092,6 +1092,351 @@
             "w": 192,
             "h": 22,
             "i": 4006
+          },
+          "htmlContent": "",
+          "markdownContent": ""
+        },
+        {
+          "id": "Panel_ID4007",
+          "type": "bar",
+          "title": "Java agent events per hour (ui_views)",
+          "description": "Window and tab views and uncaught exceptions sent by the Java ui-agent.",
+          "config": {
+            "show_legends": true,
+            "legends_position": null,
+            "unit": null,
+            "decimals": 0,
+            "line_thickness": 1.5,
+            "step_value": "0",
+            "top_results_others": false,
+            "axis_border_show": false,
+            "label_option": {
+              "rotate": 0
+            },
+            "show_symbol": false,
+            "line_interpolation": "smooth",
+            "legend_width": {
+              "unit": "px"
+            },
+            "base_map": {
+              "type": "osm"
+            },
+            "map_type": {
+              "type": "world"
+            },
+            "map_view": {
+              "zoom": 1,
+              "lat": 0,
+              "lng": 0
+            },
+            "map_symbol_style": {
+              "size": "by Value",
+              "size_by_value": {
+                "min": 1,
+                "max": 100
+              },
+              "size_fixed": 2
+            },
+            "drilldown": [],
+            "mark_line": [],
+            "override_config": [],
+            "connect_nulls": false,
+            "no_value_replacement": "",
+            "wrap_table_cells": false,
+            "table_transpose": false,
+            "table_dynamic_columns": false,
+            "color": {
+              "mode": "palette-classic-by-series",
+              "fixedColor": [],
+              "seriesBy": "last",
+              "colorBySeries": []
+            },
+            "trellis": {
+              "layout": null,
+              "num_of_columns": 1,
+              "group_by_y_axis": false
+            }
+          },
+          "queryType": "sql",
+          "queries": [
+            {
+              "query": "SELECT histogram(_timestamp, '1 hour') AS \"x_axis_1\", service AS \"breakdown_1\", count(*) AS \"y_axis_1\" FROM \"ui_views\" WHERE (service IN ($app) OR '_o2_all_' IN ($app)) GROUP BY x_axis_1, breakdown_1 ORDER BY x_axis_1 ASC",
+              "vrlFunctionQuery": "",
+              "customQuery": true,
+              "fields": {
+                "stream": "ui_views",
+                "stream_type": "logs",
+                "x": [
+                  {
+                    "label": "",
+                    "alias": "x_axis_1",
+                    "column": "x_axis_1",
+                    "color": null,
+                    "isDerived": false,
+                    "havingConditions": [],
+                    "treatAsNonTimestamp": false,
+                    "type": "custom",
+                    "functionName": null,
+                    "args": []
+                  }
+                ],
+                "y": [
+                  {
+                    "label": "",
+                    "alias": "y_axis_1",
+                    "column": "y_axis_1",
+                    "color": null,
+                    "isDerived": false,
+                    "havingConditions": [],
+                    "treatAsNonTimestamp": true,
+                    "type": "custom",
+                    "functionName": null,
+                    "args": []
+                  }
+                ],
+                "z": [],
+                "breakdown": [
+                  {
+                    "label": "",
+                    "alias": "breakdown_1",
+                    "column": "breakdown_1",
+                    "color": null,
+                    "isDerived": false,
+                    "havingConditions": [],
+                    "treatAsNonTimestamp": true,
+                    "type": "custom",
+                    "functionName": null,
+                    "args": []
+                  }
+                ],
+                "filter": {
+                  "filterType": "group",
+                  "logicalOperator": "AND",
+                  "conditions": []
+                }
+              },
+              "config": {
+                "promql_legend": "",
+                "layer_type": "scatter",
+                "weight_fixed": 1,
+                "limit": 0,
+                "min": 0,
+                "max": 100,
+                "time_shift": []
+              }
+            }
+          ],
+          "layout": {
+            "x": 0,
+            "y": 54,
+            "w": 96,
+            "h": 18,
+            "i": 4007
+          },
+          "htmlContent": "",
+          "markdownContent": ""
+        },
+        {
+          "id": "Panel_ID4008",
+          "type": "table",
+          "title": "Java agents reporting",
+          "description": "One row per Java app, environment, and host that sent health metrics. hours_reporting counts hours with at least one sample (the agent sends one every 10 seconds while the app runs). A gap here means the app was down or the agent was not loaded, so a zero on Feature inventory for that app is not usage data.",
+          "config": {
+            "show_legends": true,
+            "legends_position": null,
+            "unit": null,
+            "decimals": 0,
+            "line_thickness": 1.5,
+            "step_value": "0",
+            "top_results_others": false,
+            "axis_border_show": false,
+            "label_option": {
+              "rotate": 0
+            },
+            "show_symbol": false,
+            "line_interpolation": "smooth",
+            "legend_width": {
+              "unit": "px"
+            },
+            "base_map": {
+              "type": "osm"
+            },
+            "map_type": {
+              "type": "world"
+            },
+            "map_view": {
+              "zoom": 1,
+              "lat": 0,
+              "lng": 0
+            },
+            "map_symbol_style": {
+              "size": "by Value",
+              "size_by_value": {
+                "min": 1,
+                "max": 100
+              },
+              "size_fixed": 2
+            },
+            "drilldown": [],
+            "mark_line": [],
+            "override_config": [
+              {
+                "field": {
+                  "matchBy": "name",
+                  "value": "hours_reporting"
+                },
+                "config": [
+                  {
+                    "type": "field_type",
+                    "value": "text"
+                  },
+                  {
+                    "type": "alignment",
+                    "value": "right"
+                  }
+                ]
+              }
+            ],
+            "connect_nulls": false,
+            "no_value_replacement": "",
+            "wrap_table_cells": false,
+            "table_transpose": false,
+            "table_dynamic_columns": false,
+            "color": {
+              "mode": "palette-classic-by-series",
+              "fixedColor": [],
+              "seriesBy": "last",
+              "colorBySeries": []
+            },
+            "trellis": {
+              "layout": null,
+              "num_of_columns": 1,
+              "group_by_y_axis": false
+            },
+            "table_pagination": false
+          },
+          "queryType": "sql",
+          "queries": [
+            {
+              "query": "SELECT service_name AS app, deployment_environment_name AS env, host_name AS host, process_runtime_version AS java, count(DISTINCT date_trunc('hour', to_timestamp_micros(_timestamp))) AS hours_reporting, min(_timestamp) AS first_seen, max(_timestamp) AS last_seen FROM \"process_uptime\" WHERE (service_name IN ($app) OR '_o2_all_' IN ($app)) GROUP BY app, env, host, java ORDER BY app, env, host",
+              "vrlFunctionQuery": "",
+              "customQuery": true,
+              "fields": {
+                "stream": "process_uptime",
+                "stream_type": "metrics",
+                "x": [
+                  {
+                    "label": "",
+                    "alias": "app",
+                    "column": "app",
+                    "color": null,
+                    "isDerived": false,
+                    "havingConditions": [],
+                    "treatAsNonTimestamp": true,
+                    "type": "custom",
+                    "functionName": null,
+                    "args": []
+                  },
+                  {
+                    "label": "",
+                    "alias": "env",
+                    "column": "env",
+                    "color": null,
+                    "isDerived": false,
+                    "havingConditions": [],
+                    "treatAsNonTimestamp": true,
+                    "type": "custom",
+                    "functionName": null,
+                    "args": []
+                  },
+                  {
+                    "label": "",
+                    "alias": "host",
+                    "column": "host",
+                    "color": null,
+                    "isDerived": false,
+                    "havingConditions": [],
+                    "treatAsNonTimestamp": true,
+                    "type": "custom",
+                    "functionName": null,
+                    "args": []
+                  },
+                  {
+                    "label": "",
+                    "alias": "java",
+                    "column": "java",
+                    "color": null,
+                    "isDerived": false,
+                    "havingConditions": [],
+                    "treatAsNonTimestamp": true,
+                    "type": "custom",
+                    "functionName": null,
+                    "args": []
+                  },
+                  {
+                    "label": "",
+                    "alias": "first_seen",
+                    "column": "first_seen",
+                    "color": null,
+                    "isDerived": false,
+                    "havingConditions": [],
+                    "treatAsNonTimestamp": false,
+                    "type": "custom",
+                    "functionName": null,
+                    "args": []
+                  },
+                  {
+                    "label": "",
+                    "alias": "last_seen",
+                    "column": "last_seen",
+                    "color": null,
+                    "isDerived": false,
+                    "havingConditions": [],
+                    "treatAsNonTimestamp": false,
+                    "type": "custom",
+                    "functionName": null,
+                    "args": []
+                  }
+                ],
+                "y": [
+                  {
+                    "label": "",
+                    "alias": "hours_reporting",
+                    "column": "hours_reporting",
+                    "color": null,
+                    "isDerived": false,
+                    "havingConditions": [],
+                    "treatAsNonTimestamp": true,
+                    "type": "custom",
+                    "functionName": null,
+                    "args": []
+                  }
+                ],
+                "z": [],
+                "breakdown": [],
+                "filter": {
+                  "filterType": "group",
+                  "logicalOperator": "AND",
+                  "conditions": []
+                }
+              },
+              "config": {
+                "promql_legend": "",
+                "layer_type": "scatter",
+                "weight_fixed": 1,
+                "limit": 0,
+                "min": 0,
+                "max": 100,
+                "time_shift": []
+              }
+            }
+          ],
+          "layout": {
+            "x": 96,
+            "y": 54,
+            "w": 96,
+            "h": 18,
+            "i": 4008
           },
           "htmlContent": "",
           "markdownContent": ""

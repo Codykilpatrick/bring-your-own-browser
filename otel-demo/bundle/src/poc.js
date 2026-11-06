@@ -88,19 +88,28 @@ const label = (el) => {
 
 const ownTraffic = [/\/__poc\//];
 const interactions = ['click', 'submit', 'change'];
+const userInteraction = new UserInteractionInstrumentation({
+  eventNames: interactions,
+  // The instrumentation opens a nested span per listener; keep only the outermost one.
+  shouldPreventSpanCreation: (_event, el, span) => {
+    if (span.parentSpanContext) return true;
+    span.setAttribute('target.id', el.id || '');
+    span.setAttribute('target.name', el.getAttribute('name') || '');
+    span.setAttribute('target.text', label(el));
+  },
+});
+// A click on an icon button lands on its <svg>, which the instrumentation skips (HTML elements
+// only). Credit the nearest HTML ancestor, normally the button. Relies on the private _createSpan
+// of instrumentation-user-interaction 0.66.0.
+const createSpan = userInteraction._createSpan.bind(userInteraction);
+userInteraction._createSpan = (el, ...rest) => {
+  while (el instanceof Element && !(el instanceof HTMLElement)) el = el.parentElement;
+  return createSpan(el, ...rest);
+};
 registerInstrumentations({
   instrumentations: [
     new DocumentLoadInstrumentation(),
-    new UserInteractionInstrumentation({
-      eventNames: interactions,
-      // The instrumentation opens a nested span per listener; keep only the outermost one.
-      shouldPreventSpanCreation: (_event, el, span) => {
-        if (span.parentSpanContext) return true;
-        span.setAttribute('target.id', el.id || '');
-        span.setAttribute('target.name', el.getAttribute('name') || '');
-        span.setAttribute('target.text', label(el));
-      },
-    }),
+    userInteraction,
     new FetchInstrumentation({ ignoreUrls: ownTraffic }),
     new XMLHttpRequestInstrumentation({ ignoreUrls: ownTraffic }),
   ],

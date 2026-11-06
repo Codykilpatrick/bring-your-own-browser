@@ -73,7 +73,7 @@ spec:
       securityContext: {{- toYaml .Values.podSecurityContext | nindent 8 }}
       containers:
         - name: nginx
-          image: {{ .Values.registry }}/proxy:0.1.0
+          image: {{ .Values.registry }}/proxy:0.1.1
           securityContext: {{- toYaml .Values.containerSecurityContext | nindent 12 }}
           args: [nginx, -c, /etc/standin/nginx.conf, -g, daemon off;]
           ports:

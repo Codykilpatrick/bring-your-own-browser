@@ -33,7 +33,7 @@ spec:
       securityContext: {{- toYaml .Values.podSecurityContext | nindent 8 }}
       containers:
         - name: nginx
-          image: {{ .Values.registry }}/proxy:0.1.0
+          image: {{ .Values.registry }}/proxy:0.1.1
           securityContext: {{- toYaml .Values.containerSecurityContext | nindent 12 }}
           ports:
             - { containerPort: 8080 }

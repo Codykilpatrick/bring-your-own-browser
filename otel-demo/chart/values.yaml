@@ -1,4 +1,4 @@
-# Registry and path the images were pushed to. The chart pulls <registry>/proxy:0.1.0,
+# Registry and path the images were pushed to. The chart pulls <registry>/proxy:0.1.1,
 # <registry>/openobserve:v1.0.4 and <registry>/otelcol-contrib:0.161.0.
 registry: registry.local:5000/otel-poc
 
@@ -42,6 +42,20 @@ apps:
   #   version: "4.2"
   #   host: port-manager.poc.local
   #   upstream: https://port-manager.lab.example:8443
+  # Demo apps. name must match the app column in feature_catalog.csv.
+  # - name: redpanda-console
+  #   version: "3.9.0"
+  #   host: console.poc.local
+  #   upstream: http://<console service>.<namespace>:8080
+  #   port: 8082
+  # - name: headlamp
+  #   version: "0.44.0"
+  #   host: headlamp.poc.local
+  #   upstream: http://<headlamp service>.<namespace>:4466
+  #   port: 8083
+  #   # Overrides openobserve.privacyLevel for this app. Headlamp shows Secrets and a token
+  #   # login, so mask all text in replays.
+  #   privacy: mask
 
 # Small two-page app for checking the install before pointing at a real one.
 standin:

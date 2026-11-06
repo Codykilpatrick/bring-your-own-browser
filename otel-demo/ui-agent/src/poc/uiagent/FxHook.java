@@ -20,7 +20,7 @@ public final class FxHook implements Runnable {
     private final Map<Object, Object> hooked = Collections.synchronizedMap(new WeakHashMap<Object, Object>());
     private final Map<Object, Object> shownWindows = Collections.synchronizedMap(new WeakHashMap<Object, Object>());
     private Object lastEvent;
-    private Object actionHandler, clickHandler, releaseHandler;
+    private Object actionHandler, clickHandler, releaseHandler, activityHandler;
 
     public FxHook(Telemetry t) {
         this.t = t;
@@ -107,6 +107,12 @@ public final class FxHook implements Runnable {
                 return null;
             }
         });
+        activityHandler = Reflect.proxy("javafx.event.EventHandler", new Reflect.Handler() {
+            protected Object handle(String m, Object[] a, Method mm) {
+                if (m.equals("handle")) t.touch();
+                return null;
+            }
+        });
     }
 
     private void hookScene(Object scene) {
@@ -116,6 +122,9 @@ public final class FxHook implements Runnable {
         Reflect.call(scene, "addEventFilter", sig, Reflect.staticField("javafx.event.ActionEvent", "ACTION"), actionHandler);
         Reflect.call(scene, "addEventFilter", sig, Reflect.staticField("javafx.scene.input.MouseEvent", "MOUSE_CLICKED"), clickHandler);
         Reflect.call(scene, "addEventFilter", sig, Reflect.staticField("javafx.scene.input.MouseEvent", "MOUSE_RELEASED"), releaseHandler);
+        Reflect.call(scene, "addEventFilter", sig, Reflect.staticField("javafx.scene.input.MouseEvent", "MOUSE_PRESSED"), activityHandler);
+        Reflect.call(scene, "addEventFilter", sig, Reflect.staticField("javafx.scene.input.MouseEvent", "MOUSE_MOVED"), activityHandler);
+        Reflect.call(scene, "addEventFilter", sig, Reflect.staticField("javafx.scene.input.KeyEvent", "KEY_PRESSED"), activityHandler);
         Agent.debug("fx scene hooked");
     }
 
@@ -134,9 +143,25 @@ public final class FxHook implements Runnable {
             Object cm = Reflect.call(node, "getContextMenu");
             if (cm != null) hookItems((List<Object>) Reflect.call(cm, "getItems"));
         }
+        if (isInventoryControl(node) && hooked.put(node, Boolean.TRUE) == null) note(node);
         if (Reflect.is(node, "javafx.scene.Parent")) {
             for (Object k : (List<Object>) Reflect.call(node, "getChildrenUnmodifiable")) walk(k);
         }
+    }
+
+    /** Buttons, fields, sliders, and the like. Menus and tabs are recorded by their own hooks. */
+    private static boolean isInventoryControl(Object node) {
+        if (Reflect.is(node, "javafx.scene.control.MenuButton")) return false;
+        return Reflect.is(node, "javafx.scene.control.ButtonBase")
+                || Reflect.is(node, "javafx.scene.control.ComboBoxBase")
+                || is(node, "Slider") || is(node, "Spinner")
+                || Reflect.is(node, "javafx.scene.control.TextInputControl");
+    }
+
+    private void note(Object node) {
+        Object w = windowOf(node);
+        String path = w == null ? Views.currentPath() : pathOf(w, node);
+        t.inventory(path, label(node), node.getClass().getSimpleName());
     }
 
     @SuppressWarnings("unchecked")
@@ -153,6 +178,7 @@ public final class FxHook implements Runnable {
             } else if (!Reflect.is(item, "javafx.scene.control.SeparatorMenuItem") && hooked.put(item, Boolean.TRUE) == null) {
                 Reflect.call(item, "addEventHandler", new Class<?>[] { Reflect.cls("javafx.event.EventType"), Reflect.cls("javafx.event.EventHandler") },
                         Reflect.staticField("javafx.event.ActionEvent", "ACTION"), actionHandler);
+                note(item);
             }
         }
     }
@@ -168,16 +194,28 @@ public final class FxHook implements Runnable {
             }
         });
         Reflect.call(prop, "addListener", new Class<?>[] { Reflect.cls("javafx.beans.value.ChangeListener") }, listener);
+        Object tabs = Reflect.call(tabPane, "getTabs");
+        if (tabs instanceof List) {
+            for (Object tab : (List<?>) tabs) {
+                Object w = windowOf(tabPane);
+                String path = w == null ? Views.currentPath() : pathOf(w, tabPane);
+                t.inventory(path, mnemonicFree((String) Reflect.call(tab, "getText")), "TabPane");
+            }
+        }
     }
 
     private void windowShown(final Object w) {
         if (!Reflect.is(w, "javafx.stage.Stage")) return;
         Views.activate(t, w, pathOf(w, null));
+        if (Boolean.TRUE.equals(Reflect.call(w, "isFocused"))) t.focus(true);
         Object focused = Reflect.call(w, "focusedProperty");
         Reflect.call(focused, "addListener", new Class<?>[] { Reflect.cls("javafx.beans.value.ChangeListener") },
                 Reflect.proxy("javafx.beans.value.ChangeListener", new Reflect.Handler() {
                     protected Object handle(String m, Object[] a, Method mm) {
-                        if (m.equals("changed") && Boolean.TRUE.equals(a[2]) && Views.activeWindow != w) Views.activate(t, w, pathOf(w, null));
+                        if (!m.equals("changed")) return null;
+                        boolean on = Boolean.TRUE.equals(a[2]);
+                        if (on && Views.activeWindow != w) Views.activate(t, w, pathOf(w, null));
+                        t.focus(on || focusedStage() != null);
                         return null;
                     }
                 }));
@@ -237,7 +275,9 @@ public final class FxHook implements Runnable {
         Object w = Reflect.call(scene, "getWindow");
         if (w == null || !Boolean.TRUE.equals(Reflect.call(w, "isShowing"))) return;
         String path = pathOf(w, tabPane);
-        t.interaction("click", "javafx", path, mnemonicFree((String) Reflect.call(tab, "getText")), "TabPane", xpath(tabPane), id(tabPane), "");
+        String title = mnemonicFree((String) Reflect.call(tab, "getText"));
+        t.inventory(path, title, "TabPane");
+        t.interaction("click", "javafx", path, title, "TabPane", xpath(tabPane), id(tabPane), "");
         Views.routeChange(t, w, path);
     }
 

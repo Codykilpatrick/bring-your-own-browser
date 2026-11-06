@@ -316,8 +316,20 @@ def java_app_health():
               series('java_logs', 'count(*)', "severity IN ('ERROR', 'WARN') AND kind <> 'freeze' AND kind <> 'freeze_end' AND ", '1 hour'),
               'java_logs', (96, 36, 96, 18)),
         panel(5007, 'table', 'Recent freezes: what the event thread was doing',
-              'One row per freeze with the top frame of the event thread stack. The frame names the code that blocked the UI.',
+              'One row per freeze with the top frame of the event thread stack. The message names the control when a click or key just before the stall armed one.',
               freezes, 'java_logs', (0, 54, W, 22), text=('app', 'env', 'what', 'top_frame'), times=('at',)),
+        panel(5011, 'table', 'Time an operator was at the console',
+              'Seconds a page window was in front and someone moved the mouse, used the keyboard, or brought the window forward, '
+              'per session. A window left open with no input for 3 minutes stops counting. This is not time-on-page.',
+              f'SELECT service AS app, env, session_id, round(sum(view_time_spent) / 1e9) AS seconds_present, count(*) AS stretches '
+              f"FROM \"ui_views\" WHERE type = 'presence' AND {APP('service')} GROUP BY service, env, session_id ORDER BY seconds_present DESC",
+              'ui_views', (0, 120, 96, 22), text=('app', 'env', 'session_id'), nums=('seconds_present', 'stretches'), seconds=('seconds_present',)),
+        panel(5012, 'table', 'Controls that exist',
+              'Buttons, menus, tabs, and fields the agent saw, once per page and label. A row here was not necessarily used. '
+              'An empty label is a control with no text and no tooltip.',
+              f'SELECT service AS app, env, view_url AS page, body AS control FROM "ui_views" '
+              f"WHERE type = 'inventory' AND {APP('service')} GROUP BY service, env, view_url, body ORDER BY app, page, control LIMIT 500",
+              'ui_views', (96, 120, 96, 22), text=('app', 'env', 'page', 'control')),
         panel(5008, 'table', 'Uncaught exceptions', 'Exceptions that reached the default handler, grouped by app, page, and message.',
               uncaught, 'ui_views', (0, 76, W, 22), text=('app', 'env', 'page', 'thread', 'message', 'last_seen_utc'), nums=('errors', 'sessions')),
         panel(5009, 'table', 'Top log errors and warnings', 'Grouped by logger and message. source = stderr means it was printed, not logged.',

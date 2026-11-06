@@ -17,6 +17,8 @@ public final class Config {
     public final boolean debug;
     public final int healthSeconds;
     public final long freezeMillis;
+    /** No mouse, key, or focus this long means the operator stepped away. The window can stay open. */
+    public final long idleMillis;
     public final boolean captureStdout;
 
     private final Map<String, String> args = new HashMap<String, String>();
@@ -36,6 +38,7 @@ public final class Config {
         debug = "true".equals(get("debug", "false"));
         healthSeconds = Integer.parseInt(get("health_seconds", "10"));
         freezeMillis = Long.parseLong(get("freeze_ms", "500"));
+        idleMillis = Long.parseLong(get("idle_seconds", "180")) * 1000L;
         captureStdout = "true".equals(get("stdout", "true"));
     }
 

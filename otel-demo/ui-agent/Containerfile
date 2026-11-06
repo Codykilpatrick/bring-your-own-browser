@@ -10,6 +10,7 @@ RUN mkdir /out && \
     javac -source 1.6 -target 1.6 -bootclasspath /jdk6-rt.jar -extdirs "" -encoding UTF-8 -nowarn -Xlint:-options \
           -d /out $(find /src -name '*.java') && \
     jar cfm /ui-agent.jar /MANIFEST.MF -C /out . && \
+    java -jar /ui-agent.jar self-check && \
     jar tf /ui-agent.jar | wc -l
 
 FROM scratch

@@ -2,7 +2,9 @@ package poc.uiagent;
 
 import java.security.SecureRandom;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Turns UI events into the same records poc.js sends from browsers, so OpenObserve columns and the
@@ -17,6 +19,10 @@ public final class Telemetry {
     private final Map<String, String> viewIds = new HashMap<String, String>();
     private final Map<String, Long> viewStarts = new HashMap<String, Long>();
     private final Map<String, String> viewTypes = new HashMap<String, String>();
+    private final Set<String> inventorySeen = new HashSet<String>();
+    private long lastInput, presentSince, armedAt;
+    private boolean focused;
+    private String armedText = "", armedElement = "", armedPath = "";
 
     public Telemetry(Config cfg) {
         this.cfg = cfg;
@@ -32,6 +38,123 @@ public final class Telemetry {
         res.put("host.name", hostName());
         res.put("os.user", System.getProperty("user.name"));
         this.exporter = new Exporter(cfg, Json.attrs(res));
+        exporter.beforeShutdown = new Runnable() {
+            public void run() {
+                synchronized (Telemetry.this) { endPresence(System.currentTimeMillis()); }
+            }
+        };
+    }
+
+    /** Mouse, key, or a window coming forward. Throttled; the health tick turns this into presence time. */
+    public void touch() {
+        long now = System.currentTimeMillis();
+        synchronized (this) {
+            if (now - lastInput < 1000) return;
+            lastInput = now;
+        }
+    }
+
+    /** A page window is in front. Losing that ends the current presence stretch. */
+    public void focus(boolean on) {
+        synchronized (this) {
+            focused = on;
+            if (on) lastInput = System.currentTimeMillis();
+            else endPresence(System.currentTimeMillis());
+        }
+    }
+
+    /** Called once a second from the health thread. */
+    public void presenceTick(long now) {
+        synchronized (this) {
+            if (here(focused, now, lastInput, cfg.idleMillis)) {
+                if (presentSince == 0) presentSince = now;
+            } else {
+                endPresence(now);
+            }
+        }
+    }
+
+    private void endPresence(long now) {
+        if (presentSince == 0) return;
+        long spent = now - presentSince;
+        presentSince = 0;
+        if (spent < 1000) return;
+        String path = Views.currentPath();
+        Map<String, Object> a = rumCommon(path);
+        a.put("type", "presence");
+        a.put("view_id", hex(16));
+        a.put("view_time_spent", Long.valueOf(spent * 1000000L));
+        a.put("view_loading_type", "active");
+        exporter.log(logRecord(9, "INFO", "present " + (spent / 1000) + "s " + path, a));
+        Agent.debug("present " + (spent / 1000) + "s " + path);
+    }
+
+    /**
+     * The control a user event is about to run, recorded before the app's own handler. A handler that
+     * blocks the event thread runs before our click listener, so the freeze has to use this.
+     * A later listener for the same control must not move the timestamp forward.
+     */
+    public void arm(String text, String element, String path) {
+        synchronized (this) {
+            long now = System.currentTimeMillis();
+            if (armedAt != 0 && now - armedAt < cfg.freezeMillis + 1500
+                    && eq(text, armedText) && eq(element, armedElement)) return;
+            armedAt = now;
+            armedText = text == null ? "" : text;
+            armedElement = element == null ? "" : element;
+            armedPath = path == null ? "" : path;
+        }
+    }
+
+    /** The armed control if it was handled around the time this ping went out, else null. */
+    public Map<String, Object> hungControl(long sentAt) {
+        synchronized (this) {
+            if (!blame(sentAt, armedAt, cfg.freezeMillis)) return null;
+            Map<String, Object> a = Json.map();
+            a.put("target.text", armedText);
+            a.put("target.element", armedElement);
+            a.put("page.path", armedPath);
+            return a;
+        }
+    }
+
+    /** One row per page, label, and control type for the life of the process.
+     *  ponytail: two controls with the same label on one page collapse. Add the xpath to the key if that shows up. */
+    public void inventory(String path, String label, String element) {
+        String key = (path == null ? "" : path) + "\0" + (element == null ? "" : element) + "\0" + (label == null ? "" : label);
+        synchronized (inventorySeen) {
+            if (!inventorySeen.add(key)) return;
+        }
+        Map<String, Object> a = rumCommon(path);
+        a.put("type", "inventory");
+        a.put("target.text", label == null ? "" : label);
+        a.put("target.element", element == null ? "" : element);
+        exporter.log(logRecord(9, "INFO", "inventory " + path + " [" + label + "] " + element, a));
+        Agent.debug("inventory " + path + " [" + label + "] " + element);
+    }
+
+    static boolean here(boolean focused, long now, long lastInput, long idleMs) {
+        return focused && lastInput > 0 && now - lastInput < idleMs;
+    }
+
+    /** Click just before the ping, or just after it was queued and then blocked the thread. */
+    static boolean blame(long sentAt, long armedAt, long freezeMs) {
+        if (armedAt == 0) return false;
+        return sentAt - armedAt <= freezeMs + 1500 && armedAt - sentAt <= 1500;
+    }
+
+    private static boolean eq(String a, String b) {
+        return a == null ? b == null || b.length() == 0 : a.equals(b);
+    }
+
+    /** Run with `java -jar ui-agent.jar self-check`. */
+    static void selfCheck() {
+        if (!here(true, 10000, 9000, 3000)) throw new AssertionError("focused and recent");
+        if (here(true, 10000, 1000, 3000)) throw new AssertionError("idle");
+        if (here(false, 10000, 9000, 3000)) throw new AssertionError("blurred");
+        if (!blame(1000, 1200, 500)) throw new AssertionError("click after ping queued");
+        if (!blame(2000, 1500, 500)) throw new AssertionError("click just before ping");
+        if (blame(10000, 1000, 500)) throw new AssertionError("old click");
     }
 
     static String hostName() {
@@ -64,6 +187,7 @@ public final class Telemetry {
         a.put("target.name", name == null ? "" : name);
         a.put("rum.session_id", sessionId);
         a.put("url.full", pagePath);
+        arm(text, element, pagePath);
         StringBuilder b = new StringBuilder(512);
         b.append("{\"traceId\":\"").append(hex(16)).append("\",\"spanId\":\"").append(hex(8)).append("\",\"name\":").append(Json.str(eventType))
          .append(",\"kind\":1,\"startTimeUnixNano\":\"").append(now).append("\",\"endTimeUnixNano\":\"").append(now + 1000000L)
@@ -133,12 +257,17 @@ public final class Telemetry {
     // ---- application logs (stream java_logs) --------------------------------------------------
 
     public void log(String severity, String logger, String thread, String body, String kind, String stack) {
+        log(severity, logger, thread, body, kind, stack, null);
+    }
+
+    public void log(String severity, String logger, String thread, String body, String kind, String stack, Map<String, Object> extra) {
         Map<String, Object> a = Json.map();
         a.put("logger", logger);
         a.put("thread", thread);
         a.put("kind", kind);
         a.put("session_id", sessionId);
         if (stack != null) a.put("exception.stacktrace", stack);
+        if (extra != null) a.putAll(extra);
         exporter.log(logRecord(severityNumber(severity), severity, body, a));
     }
 

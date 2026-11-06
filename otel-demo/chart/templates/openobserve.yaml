@@ -31,20 +31,18 @@ spec:
       labels: { app: {{ .Release.Name }}-openobserve }
       annotations:
         checksum/secret: {{ printf "%s%s" $o.rootEmail $o.rootPassword | sha256sum }}
-        {{- if $o.networkAttachments.enabled }}
-        k8s.v1.cni.cncf.io/networks: {{ toJson $o.networkAttachments.entries | quote }}
-        {{- end }}
+        {{- include "otel-poc.networks" $o.networkAttachments | nindent 8 }}
     spec:
-      {{- with .Values.priorityClassName }}
-      priorityClassName: {{ . }}
+      priorityClassName: {{ required "priorityClassName is required" .Values.priorityClassName | quote }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
       {{- end }}
       securityContext: {{- toYaml .Values.podSecurityContext | nindent 8 }}
-      {{- with $o.nodeSelector }}
-      nodeSelector: {{- toYaml . | nindent 8 }}
-      {{- end }}
       containers:
         - name: openobserve
-          image: {{ .Values.registry }}/openobserve:v1.0.4
+          image: {{ include "otel-poc.image" (dict "root" . "image" $o.image) }}
+          imagePullPolicy: {{ $o.image.pullPolicy }}
           securityContext: {{- toYaml .Values.containerSecurityContext | nindent 12 }}
           env:
             - { name: ZO_DATA_DIR, value: /data }
@@ -59,10 +57,14 @@ spec:
           resources: {{- toYaml $o.resources | nindent 12 }}
           volumeMounts:
             - { name: data, mountPath: /data }
+            - { name: tmp, mountPath: /tmp }
       volumes:
         - name: data
-          {{- if $o.hostPath }}
-          hostPath: { path: {{ $o.hostPath }}, type: DirectoryOrCreate }
+          {{- if .Values.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ .Values.persistence.existingClaim | default (printf "%s-data" .Release.Name) }}
           {{- else }}
           emptyDir: {}
           {{- end }}
+        - name: tmp
+          emptyDir: {}

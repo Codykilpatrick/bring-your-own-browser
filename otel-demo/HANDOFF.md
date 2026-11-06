@@ -51,7 +51,7 @@ so the next extract does not wipe them.
 sha256sum -c otel-poc-chart-update.tar.sha256   # OK
 tar -xf otel-poc-chart-update.tar
 helm package chart
-helm upgrade otel-poc otel-poc-0.1.0.tgz -n <namespace> -f my-values.yaml
+helm upgrade otel-poc otel-poc-0.2.0.tgz -n <namespace> -f my-values.yaml
 ```
 
 Then confirm nginx has the port, the upgrade map, and the Origin rewrite:
@@ -82,15 +82,17 @@ proxy:
       hostnames: [sysvue]
   networkAttachments:
     enabled: true
-    entries: [<same shape as other Multus charts>]
+    networks:
+      - { name: <nad>, namespace: <namespace>, ips: ["<ip>/<prefix>"] }
 openobserve:
   networkAttachments:
     enabled: true
-    entries: [<own IP if they pin IPs; do not share with the proxy>]
+    networks:
+      - { name: <nad>, namespace: <namespace>, ips: ["<ip>/<prefix>"] }
 ```
 
-`networkAttachments` is the team pattern: `enabled` plus `entries`, rendered as
-`toJson | quote` on `k8s.v1.cni.cncf.io/networks`. Separate blocks per pod.
+`networkAttachments` is `enabled` plus `networks` (`name`, `namespace`, `ips`). The chart
+refuses to render when enabled without an IP. Separate blocks per pod, and do not reuse an IP.
 
 `port: 8081` lives on the **app** entry, not under `proxy`. Without it, a bare Multus IP
 matches no `server_name` and you get a blank/404.

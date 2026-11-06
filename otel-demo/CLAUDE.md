@@ -99,23 +99,25 @@ Field names (checked on v1.0.4 in kind; org is `data-org`, `default`):
   the replay upload for the browser's shared keepalive budget. `onEnd` force-flushes any span with
   `event_type`.
 - **Syslog instead of filelog** for access logs: no shared volumes or node log DaemonSet.
-- **OpenObserve on emptyDir by default**: the user wants nothing on disk for now, and the namespace
-  enforces "restricted", which forbids hostPath. Setting `openobserve.hostPath` switches to a node
-  directory (no StorageClass exists on the cluster).
+- **OpenObserve on emptyDir by default** (`persistence.enabled: false`): a restart drops collected
+  data. Keeping it is `persistence.enabled` plus `persistence.storageClass` (Ceph on Env 1 and 2).
+  Env 3 sets `persistence.local.enabled` and one local volume. The chart has no hostPath.
 - **Config checksums** hash the rendered `*-config.yaml` templates, so template-only changes roll
   the pods. Hashing `.Values` alone missed them once.
 - `poc.js` is served with `Cache-Control: no-cache`; stale cached copies hid a fix during testing.
 - **Everything runs as uid/gid 1000** under the "restricted" security context (the high-side
   cluster requires it). Stock nginx can't write `/var/run` or `/var/cache/nginx` as that user, so
   both nginx configs put `pid` and all `*_temp_path`s in `/tmp`, and the stand-in listens on 8080
-  with its own config at `/etc/standin/nginx.conf`. A hostPath, if set, needs `chown 1000:1000` on
-  the node or OpenObserve panics with "Permission denied". Test with `kubectl label ns otel-poc pod-security.kubernetes.io/enforce=restricted`.
+  with its own config at `/etc/standin/nginx.conf`. Root filesystems are read-only, so every pod
+  mounts an emptyDir on `/tmp` (OpenObserve also mounts its data volume on `/data`). Test with
+  `kubectl label ns otel-poc pod-security.kubernetes.io/enforce=restricted`.
 - **`proxy.hostAliases`** exists because high-side app servers are bare metal boxes the cluster DNS
   doesn't know (for example `sysvue`), and nginx crash-loops on an unresolvable upstream. Upstreams
   are server-only URLs with no path; a path in `proxy_pass` rewrites every request and breaks SPAs.
 - **Multus, not the ingress, is how high-side browsers reach the cluster.** `proxy.networkAttachments`
-  and `openobserve.networkAttachments` (`enabled`, `entries`, rendered with `toJson | quote`, the
-  team's standard pattern) carry the network. Separate per pod because entries may pin static IPs. Because a raw IP matches no
+  and `openobserve.networkAttachments` (`enabled`, `networks` with `name`, `namespace`, and `ips`)
+  carry the network. The chart refuses to render when enabled without an IP, and the proxy refuses
+  when `replicas` is not 1. Separate per pod because each pins its own IP. Because a raw IP matches no
   `server_name`, `apps[].port` adds a per-app `listen` so `http://<proxy IP>:<port>/` works with no
   DNS. The first real app is `sonsym` at `https://sysvue:8443`, served under `/sysvue/`.
 - **WebSockets pass through** (`proxy_http_version 1.1` plus `Upgrade`/`Connection` headers,
@@ -179,10 +181,10 @@ Field names (checked on v1.0.4 in kind; org is `data-org`, `default`):
 ## Version pins
 
 Proxy `0.1.1`, OpenObserve `v1.0.4`, `otelcol-contrib` `0.161.0`, nginx `1.30.5-alpine`, chart
-`0.1.0`, `ui-agent` `0.1.0` (`ui-agent/MANIFEST.MF` and `Agent.VERSION`). Bumping one means
-editing `build.sh`, the `image:` line in `chart/templates/`, the comment at the top of
-`chart/values.yaml`, and the push loop in `README.md`. Rebuild the proxy image (and bump its
-tag) whenever `poc.js` changes.
+`0.2.0`, `ui-agent` `0.1.0` (`ui-agent/MANIFEST.MF` and `Agent.VERSION`). Bumping an image means
+editing `build.sh`, that image's `tag` in `chart/values.yaml`, the comment at the top of
+`chart/values.yaml`, and the push loop in `README.md`. Chart changes bump `version` in
+`Chart.yaml`. Rebuild the proxy image (and bump its tag) whenever `poc.js` changes.
 
 The collector's `otlp_http` exporter is the 0.161.0 name; older contribs call it `otlphttp`.
 The agent was checked beside OpenTelemetry Java agent `2.33.1`.
@@ -197,8 +199,8 @@ docker build -t $R/proxy:0.1.1 -f proxy/Containerfile .
 docker pull public.ecr.aws/zinclabs/openobserve:v1.0.4 && docker tag public.ecr.aws/zinclabs/openobserve:v1.0.4 $R/openobserve:v1.0.4
 docker pull otel/opentelemetry-collector-contrib:0.161.0 && docker tag otel/opentelemetry-collector-contrib:0.161.0 $R/otelcol-contrib:0.161.0
 kind load docker-image --name otel-poc $R/proxy:0.1.1 $R/openobserve:v1.0.4 $R/otelcol-contrib:0.161.0
-printf 'apps:\n  - {name: standin, version: "1.0", host: standin.localhost, upstream: "http://otel-poc-standin:8080"}\n' > /tmp/kind-values.yaml
-helm package chart -d /tmp && helm install otel-poc /tmp/otel-poc-0.1.0.tgz -n otel-poc --create-namespace -f /tmp/kind-values.yaml --wait
+printf 'global:\n  imageRegistry: registry.local:5000\napps:\n  - {name: standin, version: "1.0", host: standin.localhost, upstream: "http://otel-poc-standin:8080"}\n' > /tmp/kind-values.yaml
+helm package chart -d /tmp && helm install otel-poc /tmp/otel-poc-0.2.0.tgz -n otel-poc --create-namespace -f /tmp/kind-values.yaml --wait
 kubectl -n otel-poc port-forward svc/otel-poc-proxy 8080:80 &
 kubectl -n otel-poc port-forward svc/otel-poc-openobserve 5080:5080 &
 ```
@@ -290,7 +292,7 @@ Catalog rules (`feature_catalog.csv`, `check_catalog.py` enforces most):
   `ZO_SSRF_ALLOW_LOOPBACK` or `ZO_SKIP_SSRF_CHECKS` is set, and real-time alerts skip rows that
   pass through a pipeline.
 - Release name must stay `otel-poc` unless the stand-in's `upstream` in `values.yaml` changes.
-- High-side snags (SELinux on the hostPath, CIS Pod Security, upstream DNS at nginx start, the
+- High-side snags (CIS Pod Security, upstream DNS at nginx start, the
   `Host` header) are listed in `README.md`.
 - Java agent: no replay for desktop sessions; attach mode (C) misses everything before the
   attach; unlabelled icon buttons and custom panels are clicks with an empty `target_text`;

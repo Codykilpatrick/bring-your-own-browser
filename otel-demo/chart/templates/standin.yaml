@@ -67,13 +67,16 @@ spec:
     metadata:
       labels: { app: {{ .Release.Name }}-standin }
     spec:
-      {{- with .Values.priorityClassName }}
-      priorityClassName: {{ . }}
+      priorityClassName: {{ required "priorityClassName is required" .Values.priorityClassName | quote }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
       {{- end }}
       securityContext: {{- toYaml .Values.podSecurityContext | nindent 8 }}
       containers:
         - name: nginx
-          image: {{ .Values.registry }}/proxy:0.1.1
+          image: {{ include "otel-poc.image" (dict "root" . "image" .Values.proxy.image) }}
+          imagePullPolicy: {{ .Values.proxy.image.pullPolicy }}
           securityContext: {{- toYaml .Values.containerSecurityContext | nindent 12 }}
           args: [nginx, -c, /etc/standin/nginx.conf, -g, daemon off;]
           ports:
@@ -81,7 +84,10 @@ spec:
           resources: {{- toYaml .Values.standin.resources | nindent 12 }}
           volumeMounts:
             - { name: site, mountPath: /etc/standin }
+            - { name: tmp, mountPath: /tmp }
       volumes:
         - name: site
           configMap: { name: {{ .Release.Name }}-standin }
+        - name: tmp
+          emptyDir: {}
 {{- end }}

@@ -22,13 +22,16 @@ spec:
       annotations:
         checksum/config: {{ include (print $.Template.BasePath "/collector-config.yaml") . | sha256sum }}
     spec:
-      {{- with .Values.priorityClassName }}
-      priorityClassName: {{ . }}
+      priorityClassName: {{ required "priorityClassName is required" .Values.priorityClassName | quote }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
       {{- end }}
       securityContext: {{- toYaml .Values.podSecurityContext | nindent 8 }}
       containers:
         - name: collector
-          image: {{ .Values.registry }}/otelcol-contrib:0.161.0
+          image: {{ include "otel-poc.image" (dict "root" . "image" .Values.collector.image) }}
+          imagePullPolicy: {{ .Values.collector.image.pullPolicy }}
           securityContext: {{- toYaml .Values.containerSecurityContext | nindent 12 }}
           args: [--config=/etc/otelcol/config.yaml]
           env:
@@ -41,6 +44,9 @@ spec:
           resources: {{- toYaml .Values.collector.resources | nindent 12 }}
           volumeMounts:
             - { name: config, mountPath: /etc/otelcol }
+            - { name: tmp, mountPath: /tmp }
       volumes:
         - name: config
           configMap: { name: {{ .Release.Name }}-collector }
+        - name: tmp
+          emptyDir: {}

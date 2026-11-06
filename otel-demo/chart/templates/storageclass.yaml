@@ -1,0 +1,11 @@
+{{- if and .Values.persistence.enabled .Values.persistence.local.enabled .Values.persistence.local.createStorageClass }}
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: {{ required "persistence.storageClass is required when persistence.local.createStorageClass is true" .Values.persistence.storageClass }}
+  annotations:
+    helm.sh/resource-policy: keep
+provisioner: kubernetes.io/no-provisioner
+volumeBindingMode: WaitForFirstConsumer
+reclaimPolicy: Retain
+{{- end }}

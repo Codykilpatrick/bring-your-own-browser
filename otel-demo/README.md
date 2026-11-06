@@ -32,12 +32,12 @@ and its install card), and `SHA256SUMS`. Carry `out/` across.
    done
    ```
 
-3. In `chart/values.yaml`, set `registry: <registry>/otel-poc`, the hostnames, and `openobserve.rootPassword`.
+3. In `chart/values.yaml`, set `global.imageRegistry: <registry>`, the hostnames, and `openobserve.rootPassword`.
 4. Package and install:
 
    ```bash
    helm package chart
-   helm install otel-poc otel-poc-0.1.0.tgz -n otel-poc --create-namespace
+   helm install otel-poc otel-poc-0.2.0.tgz -n otel-poc --create-namespace
    ```
 
 Keep the release name `otel-poc`; the stand-in app's upstream assumes it.
@@ -135,11 +135,13 @@ apps:
 proxy:
   networkAttachments:
     enabled: true
-    entries: [{ name: <network attachment>, namespace: <namespace> }]
+    networks:
+      - { name: <network attachment>, namespace: <namespace>, ips: ["<ip>/<prefix>"] }
 openobserve:
   networkAttachments:
     enabled: true
-    entries: [{ name: <network attachment>, namespace: <namespace> }]
+    networks:
+      - { name: <network attachment>, namespace: <namespace>, ips: ["<ip>/<prefix>"] }
 ```
 
 Then browse `http://<proxy Multus IP>:8081/sysvue/` and `http://<OpenObserve Multus IP>:5080`.
@@ -148,17 +150,19 @@ Find the IPs with `kubectl -n <ns> get pod <pod> -o jsonpath='{.metadata.annotat
 ## Add a real app
 
 Add an entry under `apps` in `values.yaml` (name, version, host, upstream), then
-`helm package chart && helm upgrade otel-poc otel-poc-0.1.0.tgz -n otel-poc`.
+`helm package chart && helm upgrade otel-poc otel-poc-0.2.0.tgz -n otel-poc`.
 Set `stripCsp: true` on an app if its Content-Security-Policy blocks the script.
 Set `standin.enabled: false` once you don't need the stand-in.
 
 ## Known snags
 
-- Every pod runs as uid/gid 1000 with the "restricted" security context (`podSecurityContext`,
-  `containerSecurityContext` in `values.yaml`).
-- Nothing is written to the node. OpenObserve keeps its data inside the pod, so a pod restart
-  wipes all collected usage and replays. To keep data, see the comment on `openobserve.hostPath`
-  in `values.yaml`.
+- Every pod runs as uid/gid 1000 with the restricted security context (`podSecurityContext`,
+  `containerSecurityContext` in `values.yaml`). Root filesystems are read-only. nginx and the
+  collector write under `/tmp`, which is an emptyDir. OpenObserve also writes `/data`.
+- With `persistence.enabled: false` (the default), OpenObserve keeps its data inside the pod, so a
+  restart wipes collected usage and replays. To keep it, set `persistence.enabled` and
+  `persistence.storageClass`. On Env 3 also set `persistence.local.enabled` and one local volume.
+  The chart does not mount a host path.
 - nginx resolves upstream hostnames at startup. An upstream the pods can't resolve crash-loops the
   proxy (`host not found in upstream`). Add the name and IP under `proxy.hostAliases`, or use the IP
   in `upstream`. Check reachability with

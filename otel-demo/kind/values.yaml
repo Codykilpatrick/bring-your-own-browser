@@ -1,4 +1,6 @@
 # helm install -f kind/values.yaml after kubectl apply -f kind/demo-apps.yaml
+global:
+  imageRegistry: registry.local:5000
 standin: { enabled: false }
 apps:
   - { name: redpanda-console, version: "3.9.0", host: console.localhost, upstream: "http://console.demo:8080", port: 8082 }

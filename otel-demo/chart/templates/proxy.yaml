@@ -1,3 +1,6 @@
+{{- if and .Values.proxy.networkAttachments.enabled (ne (int .Values.proxy.replicas) 1) }}
+{{- fail "proxy.networkAttachments pins one IP, so proxy.replicas must be 1" }}
+{{- end }}
 apiVersion: v1
 kind: Service
 metadata:
@@ -23,12 +26,12 @@ spec:
       labels: { app: {{ .Release.Name }}-proxy }
       annotations:
         checksum/config: {{ include (print $.Template.BasePath "/proxy-config.yaml") . | sha256sum }}
-        {{- if .Values.proxy.networkAttachments.enabled }}
-        k8s.v1.cni.cncf.io/networks: {{ toJson .Values.proxy.networkAttachments.entries | quote }}
-        {{- end }}
+        {{- include "otel-poc.networks" .Values.proxy.networkAttachments | nindent 8 }}
     spec:
-      {{- with .Values.priorityClassName }}
-      priorityClassName: {{ . }}
+      priorityClassName: {{ required "priorityClassName is required" .Values.priorityClassName | quote }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
       {{- end }}
       {{- with .Values.proxy.hostAliases }}
       hostAliases: {{- toYaml . | nindent 8 }}
@@ -36,7 +39,8 @@ spec:
       securityContext: {{- toYaml .Values.podSecurityContext | nindent 8 }}
       containers:
         - name: nginx
-          image: {{ .Values.registry }}/proxy:0.1.1
+          image: {{ include "otel-poc.image" (dict "root" . "image" .Values.proxy.image) }}
+          imagePullPolicy: {{ .Values.proxy.image.pullPolicy }}
           securityContext: {{- toYaml .Values.containerSecurityContext | nindent 12 }}
           ports:
             - { containerPort: 8080 }
@@ -53,6 +57,9 @@ spec:
           resources: {{- toYaml .Values.proxy.resources | nindent 12 }}
           volumeMounts:
             - { name: config, mountPath: /etc/nginx/nginx.conf, subPath: nginx.conf }
+            - { name: tmp, mountPath: /tmp }
       volumes:
         - name: config
           secret: { secretName: {{ .Release.Name }}-proxy }
+        - name: tmp
+          emptyDir: {}

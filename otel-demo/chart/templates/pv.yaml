@@ -1,0 +1,41 @@
+{{- if and .Values.persistence.local.enabled (not .Values.persistence.enabled) }}
+{{- fail "persistence.local.enabled requires persistence.enabled" }}
+{{- end }}
+{{- if and .Values.persistence.local.enabled (has "ReadWriteMany" .Values.persistence.accessModes) }}
+{{- fail "persistence.local does not support ReadWriteMany" }}
+{{- end }}
+{{- if .Values.persistence.local.enabled }}
+{{- if not .Values.persistence.local.volumes }}
+{{- fail "persistence.local.volumes is required when persistence.local.enabled is true" }}
+{{- end }}
+{{- if not .Values.persistence.selector.matchLabels }}
+{{- fail "persistence.selector.matchLabels is required when persistence.local.enabled is true" }}
+{{- end }}
+{{- range .Values.persistence.local.volumes }}
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: {{ $.Release.Name }}-{{ required "persistence.local.volumes[].name is required" .name }}
+  labels:
+    {{- toYaml $.Values.persistence.selector.matchLabels | nindent 4 }}
+  annotations:
+    helm.sh/resource-policy: keep
+spec:
+  capacity:
+    storage: {{ $.Values.persistence.size }}
+  accessModes:
+    {{- toYaml $.Values.persistence.accessModes | nindent 4 }}
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: {{ required "persistence.storageClass is required when persistence.local.enabled is true" $.Values.persistence.storageClass }}
+  local:
+    path: {{ required "persistence.local.volumes[].path is required" .path }}
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: kubernetes.io/hostname
+              operator: In
+              values: [{{ required "persistence.local.volumes[].node is required" .node | quote }}]
+{{- end }}
+{{- end }}

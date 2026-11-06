@@ -63,13 +63,16 @@ public final class Agent {
             attach(argv[1], argv.length > 2 ? argv[2] : null);
         } else if (argv.length >= 1 && argv[0].equals("list")) {
             listVms();
+        } else if (argv.length == 1 && argv[0].equals("self-check")) {
+            Telemetry.selfCheck();
+            System.out.println("ok");
         } else {
             System.out.println("ui-agent " + VERSION);
             System.out.println("  at launch:    java -javaagent:/path/ui-agent.jar[=key=value,...] -jar app.jar");
             System.out.println("  env only:     JAVA_TOOL_OPTIONS=-javaagent:/path/ui-agent.jar");
             System.out.println("  running JVM:  java -jar ui-agent.jar attach <pid> [key=value,...]");
             System.out.println("  find JVMs:    java -jar ui-agent.jar list");
-            System.out.println("Settings: endpoint, app, version, env, privacy, debug (UI_AGENT_* env or -Dui.agent.*)");
+            System.out.println("Settings: endpoint, app, version, env, privacy, debug, idle_seconds (UI_AGENT_* env or -Dui.agent.*)");
             System.exit(argv.length == 0 ? 0 : 2);
         }
     }

@@ -27,6 +27,8 @@ public final class Exporter implements Runnable {
     private long backoffUntil;
     private int backoffMs = 1000;
     volatile long sent, failed, dropped;
+    /** Runs at shutdown before the queues drain, so a last presence row is not left unsent. */
+    Runnable beforeShutdown;
 
     public Exporter(Config cfg, String resourceJson) {
         this.cfg = cfg;
@@ -152,6 +154,10 @@ public final class Exporter implements Runnable {
 
     void shutdown() {
         stopped = true;
+        try {
+            if (beforeShutdown != null) beforeShutdown.run();
+        } catch (Throwable ignored) {
+        }
         try {
             drain(spans, "/v1/traces", "resourceSpans", "scopeSpans", "spans");
             drain(logs, "/v1/logs", "resourceLogs", "scopeLogs", "logRecords");

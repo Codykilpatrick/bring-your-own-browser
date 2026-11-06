@@ -42,6 +42,7 @@ public final class Health implements Runnable {
                 pingFx();
                 swing.check(now);
                 fx.check(now);
+                t.presenceTick(now);
                 Errors.wrapDefault(t);
                 if (now - lastReport >= t.cfg.healthSeconds * 1000L) {
                     lastReport = now;
@@ -142,7 +143,8 @@ public final class Health implements Runnable {
                 if (ms > maxLatencyMs) maxLatencyMs = ms;
                 if (frozen) {
                     frozen = false;
-                    t.log("WARN", "ui-agent", threadName(), toolkit + " event thread was blocked for " + ms + " ms", "freeze_end", null);
+                    Map<String, Object> hung = t.hungControl(started);
+                    t.log("WARN", "ui-agent", threadName(), toolkit + " event thread was blocked for " + ms + " ms" + hungSuffix(hung), "freeze_end", null, hung);
                 }
                 sentAt = 0;
             }
@@ -168,8 +170,9 @@ public final class Health implements Runnable {
                 frozen = true;
                 freezes++;
                 String stack = eventThreadStack();
+                Map<String, Object> hung = t.hungControl(started);
                 t.log("WARN", "ui-agent", threadName(), toolkit + " event thread blocked for " + (now - started) + " ms so far on "
-                        + Views.currentPath(), "freeze", stack);
+                        + Views.currentPath() + hungSuffix(hung), "freeze", stack, hung);
                 t.exporter.flush();
             }
         }
@@ -187,6 +190,11 @@ public final class Health implements Runnable {
         String threadName() {
             for (Thread th : Thread.getAllStackTraces().keySet()) if (th.getName().startsWith(threadPrefix)) return th.getName();
             return threadPrefix;
+        }
+
+        String hungSuffix(Map<String, Object> hung) {
+            if (hung == null) return "";
+            return " after [" + hung.get("target.text") + "] " + hung.get("target.element");
         }
 
         String eventThreadStack() {

@@ -75,8 +75,8 @@ Pick whichever the app's launch allows. All three give the same data; the differ
 | Stream | What | Matches |
 |---|---|---|
 | traces `default` | one span per click, change (check box, combo, slider, spinner), submit (Enter in a text field): `event_type`, `page_path`, `target_text`, `target_element`, `target_xpath`, `rum_session_id` | browser spans |
-| logs `ui_views` | one row per window or tab the user is in (`type = view`, `view_url`, `view_id`, `view_time_spent`) and per uncaught exception (`type = error`) | `_rumdata` |
-| logs `java_logs` | java.util.logging, log4j 1 and 2, logback, stdout and stderr lines (`kind`, `logger`, `severity`), and event-thread freezes with the thread's stack (`kind = freeze`) | |
+| logs `ui_views` | one row per window or tab (`type = view`), per stretch the operator was actually at the console (`type = presence`, `view_time_spent`), per control that exists (`type = inventory`, `target_text`, `target_element`), and per uncaught exception (`type = error`) | `_rumdata` for views |
+| logs `java_logs` | java.util.logging, log4j 1 and 2, logback, stdout and stderr lines (`kind`, `logger`, `severity`), and event-thread freezes (`kind = freeze`). A freeze names the control when a click or key just before it armed one (`after [Label] JButton` in the message, `target_text` on the row) | |
 | metrics `jvm_*`, `ui_event_thread_*`, `process_*` | heap and pool use, GC counts and time, threads, classes, CPU, event-thread latency and freezes, every 10 s | |
 
 `page_path` is `/Window title/Selected tab`, or `/Owner title/Dialog title` for dialogs.
@@ -93,6 +93,7 @@ first cell for tables and lists, like the browser script records row text.
 | `UI_AGENT_DEBUG` | `false` | prints every event to stderr, prefixed `[ui-agent]` |
 | `UI_AGENT_HEALTH_SECONDS` | `10` | metrics interval |
 | `UI_AGENT_FREEZE_MS` | `500` | event thread blocked longer than this is a freeze |
+| `UI_AGENT_IDLE_SECONDS` | `180` | no mouse, key, or focus for this long ends a presence stretch. The window can stay open |
 | `UI_AGENT_STDOUT` | `true` | tee System.out and System.err into `java_logs` |
 
 ## Next to the official OpenTelemetry Java agent

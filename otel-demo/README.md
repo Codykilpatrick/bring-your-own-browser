@@ -1,11 +1,14 @@
 # otel-poc
 
 Page and control usage plus session replay for legacy web apps, without changing the apps.
-An nginx proxy sits in front of each app and injects one script tag. Data lands in OpenObserve.
+An nginx proxy sits in front of each app and injects one script tag. Java desktop apps (Swing,
+JavaFX) get the same tracking from a small Java agent, `ui-agent`, that is loaded next to the
+app. Data lands in OpenObserve.
 
 - `nginx_access` log stream: every page hit, server side, no browser code needed
 - `default` trace stream: one span per click, change, or submit, with page, element, label, and `rum_session_id`
 - RUM, Sessions: replays, matched to the spans by `rum_session_id`
+- `ui_views`, `java_logs`, `jvm_*` streams: windows and tabs, uncaught exceptions, log lines, and JVM health from Java desktop apps
 
 ## Build (connected side)
 
@@ -13,7 +16,8 @@ An nginx proxy sits in front of each app and injects one script tag. Data lands 
 ./build.sh
 ```
 
-Writes `out/`: `otel-poc-images.tar` (linux/amd64), `chart/`, and `SHA256SUMS`. Carry `out/` across.
+Writes `out/`: `otel-poc-images.tar` (linux/amd64), `chart/`, `ui-agent/` (the Java agent jar
+and its install card), and `SHA256SUMS`. Carry `out/` across.
 
 ## Install (high side)
 
@@ -78,11 +82,39 @@ above, redo both steps after every OpenObserve restart.
 1. Data, Enrichment Tables, New enrichment table. Name it exactly `feature_catalog`, choose
    Upload File, select `chart/files/feature_catalog.csv`, then Save.
 2. Dashboards, Import, File Upload / JSON. Import each file in `chart/files/dashboards/`:
-   `usage-summary.json`, `feature-inventory.json`, `collection-coverage.json`.
+   `usage-summary.json`, `feature-inventory.json`, `collection-coverage.json`,
+   `java-app-health.json`.
 3. Open "Feature inventory". Every cataloged page and control is listed, least used first. Before
    calling a zero unused, check "Collection coverage" for the same time range.
 
-The `app` column in the catalog must match `name` under `apps` in `values.yaml`.
+The `app` column in the catalog must match `name` under `apps` in `values.yaml` for web apps,
+and `UI_AGENT_APP` for Java desktop apps.
+
+The page panels read browser views and Java views together, and OpenObserve refuses the query
+while the Java stream (`ui_views`) does not exist yet. If no Java app has reported, either run one
+with the agent first, or on the connected side generate web-only dashboards with
+`python3 tools/make_dashboards.py --web-only` and import those.
+
+## Track a Java desktop app
+
+Copy `ui-agent/ui-agent.jar` to the workstation (for example `/opt/ui-agent/`). The proxy
+listens for the agent on port 4318 (`proxy.otlpPort`), on the ingress address or the proxy's
+Multus IP. Then, per app, either add `-javaagent:/opt/ui-agent/ui-agent.jar` to the launch
+command or set `JAVA_TOOL_OPTIONS=-javaagent:/opt/ui-agent/ui-agent.jar` in the environment the
+app starts from, and set:
+
+```
+UI_AGENT_ENDPOINT=http://<proxy IP or host>:4318
+UI_AGENT_APP=<name, same as the catalog's app column>
+UI_AGENT_VERSION=<app version>
+UI_AGENT_ENV=<site>
+```
+
+Start the app, click around, then look in OpenObserve: Traces, `service_name = <name>`; Logs,
+stream `ui_views`, rows with `view_url = /Window title/Tab`; Metrics, `jvm_memory_used`. The
+"Java app health" dashboard shows heap, event thread freezes, uncaught exceptions, and log errors
+per app. `ui-agent/README.md` has every setting, the attach-to-a-running-process option, and
+what to check when nothing arrives.
 
 Headlamp shows Secrets and a token login, so give it `privacy: mask` on its `apps` entry. Its
 replays then show every piece of text as `x`. `privacy` on an app overrides

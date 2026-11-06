@@ -11,8 +11,9 @@ import argparse, base64, csv, json, re, sys, time, urllib.request
 from pathlib import Path
 
 # Keep in step with the dashboards: origin, query string, and trailing slash dropped; hash kept.
+# Views come from the browser script (_rumdata) and the Java ui-agent (ui_views).
 PAGE_SQL = r"""SELECT service AS app, regexp_replace(regexp_replace(view_url, '^https?://[^/]+|[?][^#]*', '', 'g'), '(.)/(#|$)', '$1$2') AS path
-FROM "_rumdata" WHERE type = 'view' GROUP BY app, path"""
+FROM (SELECT service, view_url FROM "_rumdata" WHERE type = 'view' UNION ALL SELECT service, view_url FROM "ui_views" WHERE type = 'view') GROUP BY app, path"""
 CONTROL_SQL = r"""SELECT service_name AS app, regexp_replace(page_path, '(.)/$', '$1') AS path, target_text AS label
 FROM "default" WHERE event_type IN ('click', 'change', 'submit') AND target_text <> '' GROUP BY app, path, label"""
 COLUMNS = ['feature_id', 'app', 'feature_name', 'kind', 'path_pattern', 'element_label', 'writes', 'notes']

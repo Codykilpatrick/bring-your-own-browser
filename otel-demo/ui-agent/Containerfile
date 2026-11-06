@@ -1,0 +1,16 @@
+# Builds ui-agent.jar with Java 8's javac against the Java 6 class library, so the one jar loads on
+# every JVM from 6 up. Output stage is empty but for the jar: docker build --output dist .
+FROM --platform=linux/amd64 docker.io/azul/zulu-openjdk-debian:6 AS jdk6
+
+FROM --platform=linux/amd64 docker.io/azul/zulu-openjdk:8 AS build
+COPY --from=jdk6 /usr/lib/jvm/zulu-6-amd64/jre/lib/rt.jar /jdk6-rt.jar
+COPY src /src
+COPY MANIFEST.MF /MANIFEST.MF
+RUN mkdir /out && \
+    javac -source 1.6 -target 1.6 -bootclasspath /jdk6-rt.jar -extdirs "" -encoding UTF-8 -nowarn -Xlint:-options \
+          -d /out $(find /src -name '*.java') && \
+    jar cfm /ui-agent.jar /MANIFEST.MF -C /out . && \
+    jar tf /ui-agent.jar | wc -l
+
+FROM scratch
+COPY --from=build /ui-agent.jar /ui-agent.jar

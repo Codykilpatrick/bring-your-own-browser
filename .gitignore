@@ -9,3 +9,6 @@ dist/
 *.rpm
 
 .DS_Store
+
+# Downloaded by otel-demo/java-apps/build.sh
+otel-demo/java-apps/sonar-console/lib/

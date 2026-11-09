@@ -31,7 +31,8 @@ agent that sends the same shapes to the same collector.
   than one catalog row; lists pages matching none. Has an assert self-test.
 - `ui-agent/`: the Java agent. `src/poc/uiagent/*.java`, no dependencies, compiled `-source 1.6`
   against the Zulu 6 `rt.jar` inside `Containerfile` so one jar runs on Java 6 through 21.
-  `build.sh` writes `dist/ui-agent.jar` (~70 KB). `README.md` is the install card that ships in
+  `build.sh` writes `dist/ui-agent.jar` (~70 KB) plus Zulu 8's `tools.jar` and `libattach.so`,
+  which let `ui-agent.jar attach`/`list` run on a Java 8 JRE when they sit next to the jar. `README.md` is the install card that ships in
   `out/ui-agent/`.
 - `kind/`: Redpanda + Console v3.9.0 and Headlamp v0.44.0 for testing, plus `values.yaml` pointing
   the proxy at them. Not shipped. `docs/demo-walkthrough.md`: demo order and high-side click list.

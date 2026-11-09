@@ -77,10 +77,14 @@ public final class Agent {
         }
     }
 
+    static File agentJar() throws Exception {
+        return new File(Agent.class.getProtectionDomain().getCodeSource().getLocation().toURI()).getAbsoluteFile();
+    }
+
     static void attach(String pid, String args) throws Exception {
         Class<?> vm = attachApi();
         Object machine = vm.getMethod("attach", String.class).invoke(null, pid);
-        String jar = new File(Agent.class.getProtectionDomain().getCodeSource().getLocation().toURI()).getAbsolutePath();
+        String jar = agentJar().getPath();
         try {
             vm.getMethod("loadAgent", String.class, String.class).invoke(machine, jar, args);
             System.out.println("attached ui-agent to " + pid + " from " + jar);
@@ -99,20 +103,30 @@ public final class Agent {
         }
     }
 
-    /** com.sun.tools.attach.VirtualMachine: on Java 9+ it is in the jdk.attach module, before that in tools.jar. */
+    /**
+     * com.sun.tools.attach.VirtualMachine: on Java 9+ it is in the jdk.attach module, before that in
+     * tools.jar. On a Java 8 JRE, tools.jar and libattach.so copied from a JDK 8 next to ui-agent.jar
+     * stand in for the JDK.
+     */
     static Class<?> attachApi() throws Exception {
         try {
             return Class.forName("com.sun.tools.attach.VirtualMachine");
         } catch (ClassNotFoundException e) {
             File home = new File(System.getProperty("java.home"));
-            File[] candidates = { new File(home, "lib/tools.jar"), new File(home.getParentFile(), "lib/tools.jar") };
+            File[] candidates = { new File(home, "lib/tools.jar"), new File(home.getParentFile(), "lib/tools.jar"), new File(agentJar().getParentFile(), "tools.jar") };
             for (File f : candidates) {
                 if (f.isFile()) {
-                    URLClassLoader cl = new URLClassLoader(new URL[] { f.toURI().toURL() }, Agent.class.getClassLoader());
+                    final File dir = f.getParentFile();
+                    URLClassLoader cl = new URLClassLoader(new URL[] { f.toURI().toURL() }, Agent.class.getClassLoader()) {
+                        protected String findLibrary(String name) {
+                            File lib = new File(dir, System.mapLibraryName(name));
+                            return lib.isFile() ? lib.getPath() : null;
+                        }
+                    };
                     return Class.forName("com.sun.tools.attach.VirtualMachine", true, cl);
                 }
             }
-            throw new IllegalStateException("No attach API: run this command with a JDK (tools.jar), not a JRE");
+            throw new IllegalStateException("No attach API: put tools.jar and libattach.so from a JDK 8 next to " + agentJar() + ", or run this command with a JDK");
         }
     }
 

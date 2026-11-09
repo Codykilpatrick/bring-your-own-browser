@@ -4,4 +4,4 @@ set -euo pipefail
 cd "$(dirname "$0")"
 rm -rf dist
 docker build --platform linux/amd64 -f Containerfile --output type=local,dest=dist .
-ls -l dist/ui-agent.jar
+ls -l dist/ui-agent.jar dist/tools.jar dist/libattach.so

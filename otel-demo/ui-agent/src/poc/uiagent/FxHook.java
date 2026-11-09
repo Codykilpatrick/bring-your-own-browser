@@ -21,6 +21,7 @@ public final class FxHook implements Runnable {
     private final Map<Object, Object> shownWindows = Collections.synchronizedMap(new WeakHashMap<Object, Object>());
     private Object lastEvent;
     private Object actionHandler, clickHandler, releaseHandler, activityHandler;
+    private volatile boolean stopped;
 
     public FxHook(Telemetry t) {
         this.t = t;
@@ -32,6 +33,9 @@ public final class FxHook implements Runnable {
         th.setDaemon(true);
         th.start();
     }
+
+    /** Ends the scan thread. Scene filters already added stay and are dropped by Telemetry. */
+    public void stop() { stopped = true; }
 
     /** True once Platform.runLater accepts work. */
     public static boolean runLater(Runnable r) {
@@ -55,7 +59,7 @@ public final class FxHook implements Runnable {
             }
         };
         boolean announced = false;
-        while (true) {
+        while (!stopped) {
             try {
                 Thread.sleep(1000);
             } catch (InterruptedException e) {

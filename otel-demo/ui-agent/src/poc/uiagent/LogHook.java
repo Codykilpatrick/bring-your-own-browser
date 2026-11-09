@@ -18,8 +18,19 @@ import java.util.logging.Logger;
 public final class LogHook implements Runnable {
     private final Telemetry t;
     private boolean log4j1, log4j2, logback;
+    private volatile boolean stopped;
+    private Handler julHandler;
+    private PrintStream origOut, origErr, teeOut, teeErr;
 
     public LogHook(Telemetry t) { this.t = t; }
+
+    /** log4j and logback appenders stay attached and are dropped by Telemetry; those APIs vary by version. */
+    public void stop() {
+        stopped = true;
+        if (julHandler != null) Logger.getLogger("").removeHandler(julHandler);
+        if (teeOut != null && System.out == teeOut) System.setOut(origOut);
+        if (teeErr != null && System.err == teeErr) System.setErr(origErr);
+    }
 
     public void install() {
         try { hookJul(); } catch (Throwable e) { Agent.debug("jul: " + e); }
@@ -33,7 +44,7 @@ public final class LogHook implements Runnable {
 
     public void run() {
         int tick = 0;
-        while (true) {
+        while (!stopped) {
             try {
                 Thread.sleep(tick++ < 20 ? 3000 : 15000);
                 if (!log4j1) log4j1 = hookLog4j1();
@@ -51,7 +62,7 @@ public final class LogHook implements Runnable {
 
     private void hookJul() {
         Logger root = Logger.getLogger("");
-        root.addHandler(new Handler() {
+        root.addHandler(julHandler = new Handler() {
             public void publish(LogRecord r) {
                 if (r == null || r.getLoggerName() != null && r.getLoggerName().startsWith("poc.uiagent")) return;
                 String msg = r.getMessage();
@@ -177,10 +188,13 @@ public final class LogHook implements Runnable {
     // ---- System.out / System.err --------------------------------------------------------------
 
     private void hookStreams() {
-        final PrintStream out = System.out, err = System.err;
-        Agent.out = err;
-        System.setOut(new PrintStream(new Tee(out, "INFO", "stdout"), true));
-        System.setErr(new PrintStream(new Tee(err, "ERROR", "stderr"), true));
+        origOut = System.out;
+        origErr = System.err;
+        Agent.out = origErr;
+        teeOut = new PrintStream(new Tee(origOut, "INFO", "stdout"), true);
+        teeErr = new PrintStream(new Tee(origErr, "ERROR", "stderr"), true);
+        System.setOut(teeOut);
+        System.setErr(teeErr);
     }
 
     /**

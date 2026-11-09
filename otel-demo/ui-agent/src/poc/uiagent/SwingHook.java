@@ -96,6 +96,12 @@ public final class SwingHook implements AWTEventListener {
         Agent.debug("swing hook installed");
     }
 
+    /** The pushed UserEventQueue stays; without the hook it only keeps its own bookkeeping. */
+    public void stop() {
+        if (UserEventQueue.hook == this) UserEventQueue.hook = null;
+        Toolkit.getDefaultToolkit().removeAWTEventListener(this);
+    }
+
     // ---- toolkit events -----------------------------------------------------------------------
 
     public void eventDispatched(AWTEvent e) {

@@ -64,6 +64,17 @@ Pick whichever the app's launch allows. All three give the same data; the differ
    the attach classes it stops with `No attach API: put tools.jar and libattach.so from a JDK 8
    next to ...`.
 
+   To turn it off without restarting the app:
+
+   ```
+   /opt/java64/bin/java -jar /opt/ui-agent/ui-agent.jar stop <pid>
+   ```
+
+   It sends what is queued, removes its hooks, and ends its threads; the app's console shows
+   `[ui-agent] ui-agent stopped`. The code stays loaded until the app restarts (a JVM cannot
+   unload an agent), and attaching again starts it fresh. `stop` works the same on an agent
+   loaded with `-javaagent`.
+
    Nothing before the attach is recorded. Windows already open are picked up; clicks and log
    lines from before it are not.
 

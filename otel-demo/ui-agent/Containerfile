@@ -1,5 +1,5 @@
 # Builds ui-agent.jar with Java 8's javac against the Java 6 class library, so the one jar loads on
-# every JVM from 6 up. Output stage is empty but for the jar: docker build --output dist .
+# every JVM from 6 up. Output stage is the jar plus the JDK 8 attach files: docker build --output dist .
 FROM --platform=linux/amd64 docker.io/azul/zulu-openjdk-debian:6 AS jdk6
 
 FROM --platform=linux/amd64 docker.io/azul/zulu-openjdk:8 AS build
@@ -15,3 +15,5 @@ RUN mkdir /out && \
 
 FROM scratch
 COPY --from=build /ui-agent.jar /ui-agent.jar
+# The attach command on a Java 8 JRE (Linux x64) needs these two from a JDK 8, next to the jar.
+COPY --from=build /usr/lib/jvm/zulu8/lib/tools.jar /usr/lib/jvm/zulu8/jre/lib/amd64/libattach.so /

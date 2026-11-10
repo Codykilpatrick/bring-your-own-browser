@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Writes the usage dashboards and the Java app health dashboard to chart/files/dashboards/.
+"""Writes the usage dashboards and the two Java dashboards (app health, feature use) to chart/files/dashboards/.
 Connected side only.
 
 The panel boilerplate is copied from chart/files/dashboard.json so the files match what
@@ -277,6 +277,58 @@ def collection_coverage():
     ])
 
 
+# One row per control of a Java app: the page it lives on, its label, its type, and how often it was
+# used. ui-agent 0.2.0 writes an inventory row for each control it sees and an action row for each
+# click, change, or submit, both to ui_views with the same target_page, so one GROUP BY compares
+# them and no catalog is needed. target_page is where the control lives ("/Window/Tab that holds
+# it", or "/Window" for menus and toolbars), not the tab that happened to be showing.
+CONTROLS = (f"(SELECT service AS app, target_page AS screen, target_text AS control, target_element AS kind, "
+            f"count(*) FILTER (WHERE type = 'action') AS uses, "
+            f"count(DISTINCT CASE WHEN type = 'action' THEN session_id END) AS sessions, "
+            f"max(CASE WHEN type = 'action' THEN _timestamp END) AS last_used "
+            f"FROM \"ui_views\" WHERE type IN ('inventory', 'action') AND target_page <> '' AND {APP('service')} "
+            f"GROUP BY service, target_page, target_text, target_element)")
+
+
+def java_feature_use():
+    """Which controls of each Java app are used, from the agent's own list of controls. No catalog."""
+    return dashboard('java-feature-use', 'Java feature use',
+                     'Which controls of each Java desktop app are used and which never are, from the controls the ui-agent saw '
+                     '(0.2.0 and later). No feature catalog needed.', [
+        panel(6001, 'table', 'Controls per app: used vs never used',
+              'Labelled controls the agent saw in each app, split by whether anyone clicked, changed, or submitted them in the selected time range.',
+              f'SELECT app, count(*) AS controls, sum(CASE WHEN uses > 0 THEN 1 ELSE 0 END) AS used, '
+              f'sum(CASE WHEN uses = 0 THEN 1 ELSE 0 END) AS never_used, '
+              f'round(100.0 * sum(CASE WHEN uses > 0 THEN 1 ELSE 0 END) / count(*)) AS pct_used '
+              f"FROM {CONTROLS} WHERE control <> '' GROUP BY app ORDER BY app",
+              'ui_views', (0, 0, W, 12), text=('app',), nums=('controls', 'used', 'never_used', 'pct_used')),
+        panel(6002, 'table', 'Never used',
+              'Controls that exist and that nobody used in the selected time range. screen is where the control lives: a tab, a dialog, '
+              'or the window itself for menus and toolbars. A tab in this list (kind JTabbedPane or TabPane) was never opened. '
+              'A control is listed once the app has built it, so the controls of a dialog nobody opened show up as its unused menu item. '
+              'Check Collection coverage for the same range before calling a row unused.',
+              f"SELECT app, screen, control, kind FROM {CONTROLS} WHERE uses = 0 AND control <> '' ORDER BY app, screen, control LIMIT 500",
+              'ui_views', (0, 12, 96, 44), text=('app', 'screen', 'control', 'kind')),
+        panel(6003, 'table', 'Used, least used first',
+              'Controls that were used, with how often, in how many sessions, and when last.',
+              f"SELECT app, screen, control, kind, uses, sessions, {utc('last_used')} AS last_used_utc FROM {CONTROLS} "
+              f"WHERE uses > 0 AND control <> '' ORDER BY uses ASC, sessions ASC, app, screen, control LIMIT 200",
+              'ui_views', (96, 12, 96, 44), text=('app', 'screen', 'control', 'kind', 'last_used_utc'), nums=('uses', 'sessions')),
+        panel(6004, 'table', 'Screens opened, least opened first',
+              'Windows, tabs, and dialogs that came to the front at least once. A screen nobody opened is not here; look for its tab or menu item under Never used.',
+              f'SELECT service AS app, view_url AS screen, count(DISTINCT session_id) AS sessions, count(DISTINCT view_id) AS times_opened, '
+              f'{utc("max(_timestamp)")} AS last_opened_utc FROM "ui_views" WHERE type = \'view\' AND {APP("service")} '
+              f'GROUP BY service, view_url ORDER BY sessions ASC, times_opened ASC, app, screen LIMIT 200',
+              'ui_views', (0, 56, 96, 26), text=('app', 'screen', 'last_opened_utc'), nums=('sessions', 'times_opened')),
+        panel(6005, 'table', 'Controls with no label',
+              'Controls that have no text, tooltip, or name, such as icon buttons and custom panels. They cannot be told apart, so they are '
+              'one row per screen and kind and are left out of the lists above. 0 uses means none of them was used. '
+              'A tooltip on the control in the app gives it a name here.',
+              f"SELECT app, screen, kind, uses, sessions FROM {CONTROLS} WHERE control = '' ORDER BY uses ASC, app, screen LIMIT 100",
+              'ui_views', (96, 56, 96, 26), text=('app', 'screen', 'kind'), nums=('uses', 'sessions')),
+    ], app_source=('logs', 'ui_views', 'service'))
+
+
 def java_app_health():
     """JVM health and application logs from the Java ui-agent. Metrics streams are one per metric
     name; each panel reads one stream. The $app dropdown lists apps from java_logs."""
@@ -298,6 +350,21 @@ def java_app_health():
     sources = (f'SELECT service_name AS app, deployment_environment_name AS env, kind AS source, count(*) AS rows, '
                f"count(*) FILTER (WHERE severity = 'ERROR') AS errors, count(*) FILTER (WHERE severity = 'WARN') AS warnings "
                f'FROM "java_logs" WHERE {APP("service_name")} GROUP BY app, env, source ORDER BY app, env, source')
+    # Action rows (ui-agent 0.2.0): one per click, change, or submit, timed until the app's handler returned.
+    slowest = (f'SELECT service AS app, target_page AS screen, target_text AS control, target_element AS kind, count(*) AS uses, '
+               f'round(approx_percentile_cont(duration_ms, 0.5)) AS typical_ms, round(approx_percentile_cont(duration_ms, 0.95)) AS slow_ms, '
+               f'max(duration_ms) AS worst_ms, count(*) FILTER (WHERE duration_ms >= 500) AS froze '
+               f"FROM \"ui_views\" WHERE type = 'action' AND {APP('service')} GROUP BY service, target_page, target_text, target_element "
+               f'ORDER BY slow_ms DESC, worst_ms DESC LIMIT 30')
+    threw = (f'SELECT service AS app, target_page AS screen, target_text AS control, target_element AS kind, substr(error_message, 1, 140) AS message, '
+             f'count(*) AS errors, count(DISTINCT session_id) AS sessions, {utc("max(_timestamp)")} AS last_seen_utc '
+             f"FROM \"ui_views\" WHERE type = 'error' AND target_element <> '' AND {APP('service')} "
+             f'GROUP BY service, target_page, target_text, target_element, message ORDER BY errors DESC LIMIT 30')
+    copies = (f'SELECT service_name AS app, deployment_environment_name AS env, host_name AS host, os_user AS run_by, process_pid AS pid, '
+              f'process_runtime_version AS java, min(_timestamp) AS first_seen, max(_timestamp) AS last_seen, round(max(value) / 60) AS minutes_up '
+              f'FROM "process_uptime" WHERE {APP("service_name")} '
+              f'GROUP BY service_name, deployment_environment_name, host_name, os_user, process_pid, process_runtime_version, service_instance_id '
+              f'ORDER BY app, env, host, last_seen DESC LIMIT 200')
     return dashboard('java-app-health', 'Java app health',
                      'JVM health, event thread freezes, uncaught exceptions, and application logs from the Java ui-agent. '
                      'One line per app and environment.', [
@@ -318,26 +385,40 @@ def java_app_health():
         panel(5007, 'table', 'Recent freezes: what the event thread was doing',
               'One row per freeze with the top frame of the event thread stack. The message names the control when a click or key just before the stall armed one.',
               freezes, 'java_logs', (0, 54, W, 22), text=('app', 'env', 'what', 'top_frame'), times=('at',)),
+        panel(5013, 'table', 'Slowest controls',
+              'How long the app took to answer a click, change, or submit, per control: the usual time, the slow end (19 uses in 20 are faster), '
+              'and the worst. froze counts uses that held the screen for half a second or more. Timed until the app\'s own handler returned, '
+              'or until a dialog it opened appeared. Work the app hands to a background thread is not included. Needs ui-agent 0.2.0.',
+              slowest, 'ui_views', (0, 76, W, 22), text=('app', 'screen', 'control', 'kind'), nums=('uses', 'typical_ms', 'slow_ms', 'worst_ms', 'froze')),
         panel(5011, 'table', 'Time an operator was at the console',
               'Seconds a page window was in front and someone moved the mouse, used the keyboard, or brought the window forward, '
               'per session. A window left open with no input for 3 minutes stops counting. This is not time-on-page.',
               f'SELECT service AS app, env, session_id, round(sum(view_time_spent) / 1e9) AS seconds_present, count(*) AS stretches '
               f"FROM \"ui_views\" WHERE type = 'presence' AND {APP('service')} GROUP BY service, env, session_id ORDER BY seconds_present DESC",
-              'ui_views', (0, 120, 96, 22), text=('app', 'env', 'session_id'), nums=('seconds_present', 'stretches'), seconds=('seconds_present',)),
+              'ui_views', (0, 162, 96, 22), text=('app', 'env', 'session_id'), nums=('seconds_present', 'stretches'), seconds=('seconds_present',)),
         panel(5012, 'table', 'Controls that exist',
               'Buttons, menus, tabs, and fields the agent saw, once per page and label. A row here was not necessarily used. '
               'An empty label is a control with no text and no tooltip.',
               f'SELECT service AS app, env, view_url AS page, body AS control FROM "ui_views" '
               f"WHERE type = 'inventory' AND {APP('service')} GROUP BY service, env, view_url, body ORDER BY app, page, control LIMIT 500",
-              'ui_views', (96, 120, 96, 22), text=('app', 'env', 'page', 'control')),
+              'ui_views', (96, 162, 96, 22), text=('app', 'env', 'page', 'control')),
+        panel(5015, 'table', 'Copies of each app',
+              'One row per copy of an app seen in the time range: the machine, the user it runs as, its process id, and how long it has been up. '
+              'A copy whose last_seen is old has stopped. The charts above show one line per app, the worst of its copies. Needs ui-agent 0.2.0.',
+              copies, 'process_uptime', (0, 184, W, 20), text=('app', 'env', 'host', 'run_by', 'pid', 'java'), times=('first_seen', 'last_seen'),
+              nums=('minutes_up',)),
         panel(5008, 'table', 'Uncaught exceptions', 'Exceptions that reached the default handler, grouped by app, page, and message.',
-              uncaught, 'ui_views', (0, 76, W, 22), text=('app', 'env', 'page', 'thread', 'message', 'last_seen_utc'), nums=('errors', 'sessions')),
+              uncaught, 'ui_views', (0, 98, W, 22), text=('app', 'env', 'page', 'thread', 'message', 'last_seen_utc'), nums=('errors', 'sessions')),
+        panel(5014, 'table', 'Controls that threw',
+              'Uncaught exceptions that came out of a control\'s own handler, by control and message. Exceptions on background threads '
+              'have no control and are only in the panel above. Needs ui-agent 0.2.0.',
+              threw, 'ui_views', (0, 120, W, 20), text=('app', 'screen', 'control', 'kind', 'message', 'last_seen_utc'), nums=('errors', 'sessions')),
         panel(5009, 'table', 'Top log errors and warnings', 'Grouped by logger and message. source = stderr means it was printed, not logged.',
-              log_errors, 'java_logs', (0, 98, 128, 22), text=('app', 'severity', 'source', 'logger', 'message', 'last_seen_utc'), nums=('n',)),
+              log_errors, 'java_logs', (0, 140, 128, 22), text=('app', 'severity', 'source', 'logger', 'message', 'last_seen_utc'), nums=('n',)),
         panel(5010, 'table', 'Log sources captured per app',
               'Where the log rows came from: app_log (JUL, log4j, logback), stdout, stderr, freeze, uncaught_exception. '
               'An app with only stdout rows is not using a logging framework the agent hooks.',
-              sources, 'java_logs', (128, 98, 64, 22), text=('app', 'env', 'source'), nums=('rows', 'errors', 'warnings')),
+              sources, 'java_logs', (128, 140, 64, 22), text=('app', 'env', 'source'), nums=('rows', 'errors', 'warnings')),
     ], app_source=('logs', 'java_logs', 'service_name'))
 
 
@@ -346,7 +427,7 @@ if __name__ == '__main__':
     out = ROOT / 'chart/files/dashboards'
     out.mkdir(exist_ok=True)
     for name, d in [('feature-inventory', feature_inventory()), ('usage-summary', usage_summary()), ('collection-coverage', collection_coverage()),
-                    ('java-app-health', java_app_health())]:
+                    ('java-app-health', java_app_health()), ('java-feature-use', java_feature_use())]:
         (out / f'{name}.json').write_text(json.dumps(d, indent=2) + '\n')
         if '--sql' in sys.argv:
             for p in d['tabs'][0]['panels']:

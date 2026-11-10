@@ -17,8 +17,65 @@ UI_AGENT_ENV=<lab, ship, site name>                  # default: lab
 ```
 
 Every setting is also a system property (`-Dui.agent.endpoint=...`) or an agent argument
-(`-javaagent:ui-agent.jar=endpoint=...,app=...`). Arguments win over properties, which win over
-environment variables.
+(`-javaagent:ui-agent.jar=endpoint=...,app=...`). Arguments win over the settings file (below),
+which wins over properties, which win over environment variables.
+
+## Several apps on one machine
+
+Each app gets its own agent, loaded into its own JVM. One settings file covers all of them, and
+one command attaches to every app that is running. Copy `apps.conf` from `out/ui-agent/`, set the
+endpoint, and write one section per app:
+
+```
+endpoint = http://10.0.0.5:4318
+env = ship-3
+
+[sonar-console]
+match = sonar-console.jar
+version = 4.2
+
+[plot-editor]
+match = com.example.plot.Main
+title_trim = \s+-\s.*$|\d+
+```
+
+Lines above the first section apply to every app. The name in brackets is the app name in
+OpenObserve. `match` is text from the app's line in `java -jar ui-agent.jar list` (part of its jar
+path or its main class); the first section that matches wins.
+
+```
+/opt/java64/bin/java -jar /opt/ui-agent/ui-agent.jar attach-all /opt/ui-agent/apps.conf
+```
+
+```
+attached  2114  sonar-console  (Java 1.8.0_504)
+attached  2120  sonar-console  (Java 1.8.0_504)
+already   2377  plot-editor  (ui-agent 0.2.0 is running in it)
+skipped   2581  org.apache.catalina.startup.Bootstrap start  (no section in apps.conf matches)
+2 attached, 1 already attached, 1 skipped, 0 run by another user, 0 failed. ...
+```
+
+It is safe to run again: apps that already have the agent are left alone, so run it after any app
+restarts, or from cron. JVMs that match no section are not touched. The exit code is 0 when every
+matching app has the agent, 1 otherwise.
+
+A JVM only takes an agent from the user that started it. A normal user sees only their own apps.
+Root sees everyone's and prints an `other` line with the command to run as that user:
+
+```
+other     96  sonar-console  (runs as opsuser; run: sudo -u opsuser java -jar /opt/ui-agent/ui-agent.jar attach-all /opt/ui-agent/apps.conf)
+```
+
+The file has to be readable by each of those users, because the app's JVM reads it too. The rules
+for which `java` can run the command are the same as for `attach` below.
+
+Two copies of the same app report under the same app name. Every row also carries
+`service_instance_id` (`host:pid:start time`), `process_pid`, and `os_user`, and the "Copies of
+each app" panel on the Java app health dashboard lists them.
+
+The same file works without attach: `-javaagent:/opt/ui-agent/ui-agent.jar=config=/opt/ui-agent/apps.conf`
+picks the section that matches the JVM it is loaded into. `attach <pid>` with its own arguments
+still works for a single app.
 
 ## Three ways to load it
 
@@ -82,8 +139,8 @@ Pick whichever the app's launch allows. All three give the same data; the differ
 
 | Stream | What | Matches |
 |---|---|---|
-| traces `default` | one span per click, change (check box, combo, slider, spinner), submit (Enter in a text field): `event_type`, `page_path`, `target_text`, `target_element`, `target_xpath`, `rum_session_id` | browser spans |
-| logs `ui_views` | one row per window or tab (`type = view`), per stretch the operator was actually at the console (`type = presence`, `view_time_spent`), per control that exists (`type = inventory`, `target_text`, `target_element`), and per uncaught exception (`type = error`) | `_rumdata` for views |
+| traces `default` | one span per click, change (check box, combo, slider, spinner), submit (Enter in a text field): `event_type`, `page_path`, `target_text`, `target_element`, `target_xpath`, `rum_session_id`. The span lasts as long as the app's handler took | browser spans |
+| logs `ui_views` | one row per window or tab (`type = view`), per stretch the operator was actually at the console (`type = presence`, `view_time_spent`), per control that exists (`type = inventory`), per click, change, or submit (`type = action`, `event_type`, `duration_ms`), per uncaught exception (`type = error`, naming the control when its handler threw), and one per agent start (`type = start`). Inventory, action, and error rows share `target_text`, `target_element`, and `target_page` | `_rumdata` for views |
 | logs `java_logs` | java.util.logging, log4j 1 and 2, logback, stdout and stderr lines (`kind`, `logger`, `severity`), and event-thread freezes (`kind = freeze`). A freeze names the control when a click or key just before it armed one (`after [Label] JButton` in the message, `target_text` on the row) | |
 | metrics `jvm_*`, `ui_event_thread_*`, `process_*` | heap and pool use, GC counts and time, threads, classes, CPU, event-thread latency and freezes, every 10 s | |
 
@@ -92,6 +149,20 @@ Pick whichever the app's launch allows. All three give the same data; the differ
 name, or the label just before the control. Under the default `UI_AGENT_PRIVACY=mask-values`
 nothing a user typed and no table cell text is ever recorded; `allow` records the selected row's
 first cell for tables and lists, like the browser script records row text.
+
+`target_page` is where a control lives, and it does not change with what is on screen: the tab
+that contains it, `/Window title` for menus and toolbars, the dialog for a dialog's controls.
+`page_path` on the same row is the screen that was showing at the time. The "never used" list
+compares inventory rows with action rows on `target_page`, `target_text`, and `target_element`.
+
+A control is listed once it has been built inside a window that is showing. Tabs that have not
+been opened are included. A dialog's controls are listed the first time anyone opens that dialog,
+so a dialog nobody has ever opened shows as a never used menu item or button, not as its contents.
+Tables, lists, trees, and custom panels are not in the list; they show up once someone clicks
+them. The list is sent again every hour so it stays inside the dashboard's time range.
+
+`duration_ms` is the time the event thread spent in the control's handler. Work the handler hands
+to a background thread is not in it, and neither is the time a dialog it opened stayed up.
 
 ## Other settings
 
@@ -103,6 +174,9 @@ first cell for tables and lists, like the browser script records row text.
 | `UI_AGENT_FREEZE_MS` | `500` | event thread blocked longer than this is a freeze |
 | `UI_AGENT_IDLE_SECONDS` | `180` | no mouse, key, or focus for this long ends a presence stretch. The window can stay open |
 | `UI_AGENT_STDOUT` | `true` | tee System.out and System.err into `java_logs` |
+| `UI_AGENT_TITLE_TRIM` | none | a regular expression; whatever it matches in a window, dialog, or tab title becomes `*`. `\d+` turns `Track 0042` into `Track *`, so titles with a number or file name count as one screen. A pattern with a comma has to go in the settings file or the environment, not in agent arguments |
+| `UI_AGENT_INVENTORY_MINUTES` | `60` | how often the list of controls is sent again |
+| `config` (argument only) | none | path to a settings file, see "Several apps on one machine" |
 
 ## Next to the official OpenTelemetry Java agent
 
@@ -113,10 +187,14 @@ needed on the workstation.
 
 ## Check it
 
-With `UI_AGENT_DEBUG=true`, stderr shows `[ui-agent] ui-agent 0.1.0 (premain) ...` at start,
-`[ui-agent] view /Title/Tab (initial_load)` when the first window opens, and one
-`[ui-agent] click /Title/Tab [Label] JButton` line per interaction. `POST /v1/... failed` lines mean
-the endpoint is wrong or unreachable; events queue up and go out when it comes back.
+With `UI_AGENT_DEBUG=true` (`debug = true` in the settings file), stderr shows
+`[ui-agent] ui-agent 0.2.0 (premain) ...` at start, one `[ui-agent] inventory /Title/Tab [Label] JButton`
+line per control it found, `[ui-agent] view /Title/Tab (initial_load)` when the first window opens,
+and one `[ui-agent] click /Title/Tab [Label] JButton 12 ms` line per interaction.
+`POST /v1/... failed` lines mean the endpoint is wrong or unreachable; events queue up and go out
+when it comes back.
 
 In OpenObserve: Traces, stream `default`, `service_name = <app>`; Logs, `ui_views` and
-`java_logs`; Metrics, `jvm_memory_used`.
+`java_logs`; Metrics, `jvm_memory_used`. Logs, `ui_views`, `type = 'start'` has one row per agent
+start with the app name, user, and process id, which is the quickest check that every app on a
+machine is reporting.

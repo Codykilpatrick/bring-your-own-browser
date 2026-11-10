@@ -12,7 +12,9 @@ import java.net.URLClassLoader;
  * main for the attach command line: java -jar ui-agent.jar attach &lt;pid&gt; [key=value,...]
  */
 public final class Agent {
-    public static final String VERSION = "0.1.0";
+    public static final String VERSION = "0.2.0";
+    /** Set in the app's JVM while the agent runs, so attach-all can tell which JVMs already have it. */
+    static final String RUNNING = "ui.agent.running";
     static volatile boolean debug;
     static PrintStream out = System.err;
     private static volatile Telemetry telemetry;
@@ -39,8 +41,11 @@ public final class Agent {
             Config cfg = new Config(args);
             debug = cfg.debug;
             out = System.err;
+            Views.setTrim(cfg.titleTrim);
             Telemetry t = new Telemetry(cfg);
             telemetry = t;
+            System.setProperty(RUNNING, VERSION);
+            t.started(how);
             info("ui-agent " + VERSION + " (" + how + ") " + cfg + " session=" + t.sessionId);
             Errors.install(t);
             swing = new SwingHook(t);
@@ -69,6 +74,7 @@ public final class Agent {
             return;
         }
         telemetry = null;
+        System.clearProperty(RUNNING);
         try {
             t.log("INFO", "ui-agent", Thread.currentThread().getName(), "ui-agent stopped", "agent", null);
             t.stop();
@@ -107,19 +113,29 @@ public final class Agent {
         } else if (argv.length == 2 && argv[0].equals("stop")) {
             load(argv[1], "stop");
             System.out.println("stopped ui-agent in " + argv[1]);
+        } else if (argv.length == 2 && argv[0].equals("attach-all")) {
+            File conf = new File(argv[1]).getAbsoluteFile();
+            if (!conf.isFile() || !conf.canRead()) {
+                System.out.println("cannot read " + conf);
+                System.exit(2);
+            }
+            if (attachAll(conf) > 0) System.exit(1);
         } else if (argv.length >= 1 && argv[0].equals("list")) {
             listVms();
         } else if (argv.length == 1 && argv[0].equals("self-check")) {
             Telemetry.selfCheck();
+            Config.selfCheck();
+            Views.selfCheck();
             System.out.println("ok");
         } else {
             System.out.println("ui-agent " + VERSION);
             System.out.println("  at launch:    java -javaagent:/path/ui-agent.jar[=key=value,...] -jar app.jar");
             System.out.println("  env only:     JAVA_TOOL_OPTIONS=-javaagent:/path/ui-agent.jar");
             System.out.println("  running JVM:  java -jar ui-agent.jar attach <pid> [key=value,...]");
+            System.out.println("  every app:    java -jar ui-agent.jar attach-all <file>   (one [app] section per app, see README)");
             System.out.println("  stop it:      java -jar ui-agent.jar stop <pid>");
             System.out.println("  find JVMs:    java -jar ui-agent.jar list");
-            System.out.println("Settings: endpoint, app, version, env, privacy, debug, idle_seconds (UI_AGENT_* env or -Dui.agent.*)");
+            System.out.println("Settings: endpoint, app, version, env, privacy, title_trim, debug, idle_seconds, config (UI_AGENT_* env or -Dui.agent.*)");
             System.exit(argv.length == 0 ? 0 : 2);
         }
     }
@@ -136,6 +152,97 @@ public final class Agent {
         } finally {
             vm.getMethod("detach").invoke(machine);
         }
+    }
+
+    /**
+     * Attaches to every running JVM that a section of the file names, and leaves the rest alone. Each
+     * app is told to read its settings from the same file. Returns how many attaches failed.
+     * Only JVMs started by the user running this command are visible to it.
+     */
+    static int attachAll(File file) throws Exception {
+        java.util.Map<String, java.util.Map<String, String>> conf = Config.readFile(file);
+        Class<?> vm = attachApi();
+        String self = Telemetry.pid();
+        String me = uidOf("self");
+        int attached = 0, already = 0, skipped = 0, otherUser = 0, failed = 0;
+        for (Object d : (java.util.List<?>) vm.getMethod("list").invoke(null)) {
+            String id = String.valueOf(d.getClass().getMethod("id").invoke(d));
+            String name = String.valueOf(d.getClass().getMethod("displayName").invoke(d));
+            if (id.equals(self)) continue;
+            String app = Config.match(conf, name);
+            if (app == null) {
+                skipped++;
+                System.out.println("skipped   " + id + "  " + name + "  (no section in " + file.getName() + " matches)");
+                continue;
+            }
+            // root sees every user's JVMs but a JVM only takes an agent from its own user. Trying anyway
+            // waits 10 s and makes the app print a thread dump, so say who to run this as instead.
+            String owner = uidOf(id);
+            if (me != null && owner != null && !owner.equals(me)) {
+                otherUser++;
+                System.out.println("other     " + id + "  " + app + "  (runs as " + userName(owner) + "; run: sudo -u " + userName(owner)
+                        + " java -jar " + agentJar().getPath() + " attach-all " + file.getPath() + ")");
+                continue;
+            }
+            try {
+                Object machine = vm.getMethod("attach", String.class).invoke(null, id);
+                try {
+                    java.util.Properties props = (java.util.Properties) vm.getMethod("getSystemProperties").invoke(machine);
+                    if (props.getProperty(RUNNING) != null) {
+                        already++;
+                        System.out.println("already   " + id + "  " + app + "  (ui-agent " + props.getProperty(RUNNING) + " is running in it)");
+                        continue;
+                    }
+                    vm.getMethod("loadAgent", String.class, String.class).invoke(machine, agentJar().getPath(), "config=" + file.getPath() + ",app=" + app);
+                    attached++;
+                    System.out.println("attached  " + id + "  " + app + "  (Java " + props.getProperty("java.version") + ")");
+                } finally {
+                    vm.getMethod("detach").invoke(machine);
+                }
+            } catch (Throwable e) {
+                Throwable cause = e instanceof java.lang.reflect.InvocationTargetException && e.getCause() != null ? e.getCause() : e;
+                failed++;
+                System.out.println("failed    " + id + "  " + app + "  " + cause);
+            }
+        }
+        System.out.println(attached + " attached, " + already + " already attached, " + skipped + " skipped, " + otherUser + " run by another user, "
+                + failed + " failed. This run handles the apps started by " + System.getProperty("user.name") + "; run it as each user that runs an app.");
+        return failed + otherUser;
+    }
+
+    /** The user id a process runs as, from /proc. Null where there is no /proc (the attach is then just tried). */
+    static String uidOf(String pid) {
+        try {
+            java.io.BufferedReader r = new java.io.BufferedReader(new java.io.FileReader("/proc/" + pid + "/status"));
+            try {
+                for (String line = r.readLine(); line != null; line = r.readLine()) {
+                    // "Uid:  real  effective  saved  filesystem"
+                    if (line.startsWith("Uid:")) return line.substring(4).trim().split("\\s+")[1];
+                }
+            } finally {
+                r.close();
+            }
+        } catch (Exception e) {
+            // not Linux, or the process is gone
+        }
+        return null;
+    }
+
+    static String userName(String uid) {
+        try {
+            java.io.BufferedReader r = new java.io.BufferedReader(new java.io.FileReader("/etc/passwd"));
+            try {
+                for (String line = r.readLine(); line != null; line = r.readLine()) {
+                    String[] f = line.split(":");
+                    if (f.length > 2 && f[2].equals(uid)) return f[0];
+                }
+            } finally {
+                r.close();
+            }
+        } catch (Exception e) {
+            // fall through to the number
+        }
+        return "#" + uid;
     }
 
     static void listVms() throws Exception {

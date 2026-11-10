@@ -1,10 +1,13 @@
 package poc.uiagent;
 
+import java.lang.management.ManagementFactory;
+import java.lang.management.RuntimeMXBean;
 import java.security.SecureRandom;
+import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
 /**
  * Turns UI events into the same records poc.js sends from browsers, so OpenObserve columns and the
@@ -13,44 +16,86 @@ import java.util.Set;
  */
 public final class Telemetry {
     private static final SecureRandom RND = new SecureRandom();
+    /** Controls remembered for the resend. Titles that keep changing with no title_trim would otherwise grow this without end. */
+    private static final int INVENTORY_MAX = 5000;
     public final Config cfg;
     public final String sessionId = hex(16);
     public final Exporter exporter;
     private final Map<String, String> viewIds = new HashMap<String, String>();
     private final Map<String, Long> viewStarts = new HashMap<String, Long>();
     private final Map<String, String> viewTypes = new HashMap<String, String>();
-    private final Set<String> inventorySeen = new HashSet<String>();
-    private long lastInput, presentSince, armedAt;
+    /** Every control seen in this process: key to {page, label, element}. */
+    private final Map<String, String[]> inventorySeen = new LinkedHashMap<String, String[]>();
+    private final List<Action> open = new ArrayList<Action>();
+    private long lastInput, presentSince, armedAt, failedAt, lastInventory = System.currentTimeMillis();
     private boolean focused;
-    private String armedText = "", armedElement = "", armedPath = "";
+    private String armedText = "", armedElement = "", armedPath = "", armedHome = "";
+    private Map<String, Object> failed;
     /** Set by Agent.stop. Listeners left on controls still call in; they are dropped here. */
     private volatile boolean stopped;
 
     public Telemetry(Config cfg) {
         this.cfg = cfg;
+        RuntimeMXBean rt = ManagementFactory.getRuntimeMXBean();
+        String pid = pid();
         Map<String, Object> res = Json.map();
         res.put("service.name", cfg.app);
         res.put("service.version", cfg.version);
+        // One app can run several times on one machine; this tells the copies apart.
+        res.put("service.instance.id", hostName() + ":" + pid + ":" + rt.getStartTime() / 1000);
         res.put("deployment.environment.name", cfg.env);
         res.put("telemetry.sdk.name", "poc.ui-agent");
         res.put("telemetry.sdk.language", "java");
         res.put("telemetry.sdk.version", Agent.VERSION);
         res.put("process.runtime.name", System.getProperty("java.runtime.name"));
         res.put("process.runtime.version", System.getProperty("java.runtime.version"));
+        res.put("process.pid", pid);
         res.put("host.name", hostName());
         res.put("os.user", System.getProperty("user.name"));
         this.exporter = new Exporter(cfg, Json.attrs(res));
         exporter.beforeShutdown = new Runnable() {
             public void run() {
+                finishOpen();
                 synchronized (Telemetry.this) { endPresence(System.currentTimeMillis()); }
             }
         };
     }
 
+    /** "1234" from the JVM's "1234@host" name. */
+    static String pid() {
+        String name = ManagementFactory.getRuntimeMXBean().getName();
+        int at = name == null ? -1 : name.indexOf('@');
+        return at > 0 ? name.substring(0, at) : "0";
+    }
+
     /** Stops taking new records and closes the open view. The exporter sends what is queued. */
     public void stop() {
         stopped = true;
+        finishOpen();
         endAllViews();
+    }
+
+    /**
+     * One row per agent start. It carries every column the dashboards read, empty, so a panel does not
+     * fail on a site where nobody has clicked or hit an exception yet: OpenObserve refuses a query that
+     * names a column the stream has never seen.
+     */
+    public void started(String how) {
+        Map<String, Object> a = rumCommon("");
+        a.put("type", "start");
+        a.put("load_mode", how);
+        a.put("view_id", "");
+        a.put("view_time_spent", Long.valueOf(0));
+        a.put("view_loading_type", "");
+        a.put("event_type", "");
+        a.put("target.text", "");
+        a.put("target.element", "");
+        a.put("target.page", "");
+        a.put("duration_ms", Long.valueOf(0));
+        a.put("error_message", "");
+        a.put("error_stack", "");
+        a.put("error_source", "");
+        exporter.log(logRecord(9, "INFO", "ui-agent started via " + how, a));
     }
 
     /** Mouse, key, or a window coming forward. Throttled; the health tick turns this into presence time. */
@@ -103,8 +148,9 @@ public final class Telemetry {
      * The control a user event is about to run, recorded before the app's own handler. A handler that
      * blocks the event thread runs before our click listener, so the freeze has to use this.
      * A later listener for the same control must not move the timestamp forward.
+     * home is where the control lives (see SwingHook.homeOf); path is the page showing now.
      */
-    public void arm(String text, String element, String path) {
+    public void arm(String text, String element, String path, String home) {
         if (stopped) return;
         synchronized (this) {
             long now = System.currentTimeMillis();
@@ -114,6 +160,7 @@ public final class Telemetry {
             armedText = text == null ? "" : text;
             armedElement = element == null ? "" : element;
             armedPath = path == null ? "" : path;
+            armedHome = home == null ? "" : home;
         }
     }
 
@@ -121,28 +168,90 @@ public final class Telemetry {
     public Map<String, Object> hungControl(long sentAt) {
         synchronized (this) {
             if (!blame(sentAt, armedAt, cfg.freezeMillis)) return null;
-            Map<String, Object> a = Json.map();
-            a.put("target.text", armedText);
-            a.put("target.element", armedElement);
+            Map<String, Object> a = armedControl();
             a.put("page.path", armedPath);
             return a;
         }
     }
 
-    /** One row per page, label, and control type for the life of the process.
-     *  ponytail: two controls with the same label on one page collapse. Add the xpath to the key if that shows up. */
-    public void inventory(String path, String label, String element) {
-        if (stopped) return;
-        String key = (path == null ? "" : path) + "\0" + (element == null ? "" : element) + "\0" + (label == null ? "" : label);
-        synchronized (inventorySeen) {
-            if (!inventorySeen.add(key)) return;
+    private Map<String, Object> armedControl() {
+        Map<String, Object> a = Json.map();
+        a.put("target.text", armedText);
+        a.put("target.element", armedElement);
+        a.put("target.page", armedHome);
+        return a;
+    }
+
+    /**
+     * The app's handler threw during a user event that an action was recorded for, so the armed control
+     * is that action's. The uncaught-exception row that follows names it.
+     */
+    public void threw() {
+        synchronized (this) {
+            if (armedAt == 0) return;
+            failed = armedControl();
+            failedAt = System.currentTimeMillis();
         }
-        Map<String, Object> a = rumCommon(path);
+    }
+
+    /** The control whose handler just threw, else an action of this toolkit still running its handler, else null. */
+    private Map<String, Object> failedControl(String source) {
+        if ("swing".equals(source)) {
+            synchronized (this) {
+                Map<String, Object> f = failed;
+                failed = null;
+                if (f != null && System.currentTimeMillis() - failedAt < 2000) return f;
+            }
+        }
+        synchronized (open) {
+            for (int i = open.size() - 1; i >= 0; i--) {
+                Action a = open.get(i);
+                if (!a.toolkit.equals(source)) continue;
+                Map<String, Object> f = Json.map();
+                f.put("target.text", a.text);
+                f.put("target.element", a.element);
+                f.put("target.page", a.home);
+                return f;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * A control that exists, by where it lives, its label, and its type. Sent once, then again with every
+     * other control seen so far each inventory_minutes: a dashboard looking at the last day has to list
+     * the controls of an app that has been up for a month.
+     * ponytail: two controls with the same label on one page collapse. Add the xpath to the key if that shows up.
+     */
+    public void inventory(String home, String label, String element) {
+        if (stopped) return;
+        String[] row = { home == null ? "" : home, label == null ? "" : label, element == null ? "" : element };
+        String key = row[0] + "\0" + row[2] + "\0" + row[1];
+        synchronized (inventorySeen) {
+            if (inventorySeen.containsKey(key) || inventorySeen.size() >= INVENTORY_MAX) return;
+            inventorySeen.put(key, row);
+        }
+        inventoryRow(row);
+        Agent.debug("inventory " + row[0] + " [" + row[1] + "] " + row[2]);
+    }
+
+    private void inventoryRow(String[] row) {
+        Map<String, Object> a = rumCommon(row[0]);
         a.put("type", "inventory");
-        a.put("target.text", label == null ? "" : label);
-        a.put("target.element", element == null ? "" : element);
-        exporter.log(logRecord(9, "INFO", "inventory " + path + " [" + label + "] " + element, a));
-        Agent.debug("inventory " + path + " [" + label + "] " + element);
+        a.put("target.text", row[1]);
+        a.put("target.element", row[2]);
+        a.put("target.page", row[0]);
+        exporter.log(logRecord(9, "INFO", "inventory " + row[0] + " [" + row[1] + "] " + row[2], a));
+    }
+
+    /** Called once a second from the health thread. */
+    public void inventoryTick(long now) {
+        if (stopped || now - lastInventory < cfg.inventoryMillis) return;
+        lastInventory = now;
+        List<String[]> rows;
+        synchronized (inventorySeen) { rows = new ArrayList<String[]>(inventorySeen.values()); }
+        for (String[] row : rows) inventoryRow(row);
+        Agent.debug("inventory resent, " + rows.size() + " controls");
     }
 
     static boolean here(boolean focused, long now, long lastInput, long idleMs) {
@@ -167,6 +276,8 @@ public final class Telemetry {
         if (!blame(1000, 1200, 500)) throw new AssertionError("click after ping queued");
         if (!blame(2000, 1500, 500)) throw new AssertionError("click just before ping");
         if (blame(10000, 1000, 500)) throw new AssertionError("old click");
+        if (millis(0, 2600000) != 3) throw new AssertionError("rounds to the nearest ms");
+        if (millis(5000, 1000) != 0) throw new AssertionError("never negative");
     }
 
     static String hostName() {
@@ -183,31 +294,98 @@ public final class Telemetry {
 
     static long nowNanos() { return System.currentTimeMillis() * 1000000L; }
 
+    static long millis(long startNanos, long endNanos) {
+        return Math.max(0, endNanos - startNanos + 500000L) / 1000000L;
+    }
+
     // ---- interactions -------------------------------------------------------------------------
 
-    /** One span per click, change, or submit. Flushed right away, like poc.js does. */
-    public void interaction(String eventType, String toolkit, String pagePath, String text, String element, String xpath, String id, String name) {
-        if (stopped) return;
-        long now = nowNanos();
-        Map<String, Object> a = Json.map();
-        a.put("event_type", eventType);
-        a.put("ui.toolkit", toolkit);
-        a.put("page.path", pagePath);
-        a.put("target.text", text == null ? "" : text);
-        a.put("target.element", element == null ? "" : element);
-        a.put("target.xpath", xpath == null ? "" : xpath);
-        a.put("target.id", id == null ? "" : id);
-        a.put("target.name", name == null ? "" : name);
-        a.put("rum.session_id", sessionId);
-        a.put("url.full", pagePath);
-        arm(text, element, pagePath);
-        StringBuilder b = new StringBuilder(512);
-        b.append("{\"traceId\":\"").append(hex(16)).append("\",\"spanId\":\"").append(hex(8)).append("\",\"name\":").append(Json.str(eventType))
-         .append(",\"kind\":1,\"startTimeUnixNano\":\"").append(now).append("\",\"endTimeUnixNano\":\"").append(now + 1000000L)
-         .append("\",\"attributes\":").append(Json.attrs(a)).append(",\"status\":{}}");
-        exporter.span(b.toString());
-        exporter.flush();
-        Agent.debug(eventType + " " + pagePath + " [" + text + "] " + element);
+    /**
+     * One click, change, or submit. The caller holds it until the app's own handler has returned and
+     * then calls finish, so the record carries how long the app took to answer.
+     */
+    public final class Action {
+        final String eventType, toolkit, pagePath, home, text, element, xpath, id, name;
+        private long startNanos = System.nanoTime(), startWall = nowNanos();
+        private boolean done;
+
+        Action(String eventType, String toolkit, String pagePath, String home, String text, String element, String xpath, String id, String name) {
+            this.eventType = eventType;
+            this.toolkit = toolkit;
+            this.pagePath = pagePath == null ? "" : pagePath;
+            this.home = home == null ? this.pagePath : home;
+            this.text = text == null ? "" : text;
+            this.element = element == null ? "" : element;
+            this.xpath = xpath == null ? "" : xpath;
+            this.id = id == null ? "" : id;
+            this.name = name == null ? "" : name;
+        }
+
+        /** The user event began at this System.nanoTime(). The app's listener may have run before ours did. */
+        void startedAt(long nanoTime) {
+            if (nanoTime >= startNanos) return;
+            startWall -= startNanos - nanoTime;
+            startNanos = nanoTime;
+        }
+
+        /** Sends the span and the action row. end is a System.nanoTime(). Safe to call twice. */
+        public void finish(long end) {
+            synchronized (open) {
+                if (done) return;
+                done = true;
+                open.remove(this);
+            }
+            long ms = millis(startNanos, end);
+            Map<String, Object> a = Json.map();
+            a.put("event_type", eventType);
+            a.put("ui.toolkit", toolkit);
+            a.put("page.path", pagePath);
+            a.put("target.text", text);
+            a.put("target.element", element);
+            a.put("target.page", home);
+            a.put("target.xpath", xpath);
+            a.put("target.id", id);
+            a.put("target.name", name);
+            a.put("rum.session_id", sessionId);
+            a.put("url.full", pagePath);
+            StringBuilder b = new StringBuilder(512);
+            b.append("{\"traceId\":\"").append(hex(16)).append("\",\"spanId\":\"").append(hex(8)).append("\",\"name\":").append(Json.str(eventType))
+             .append(",\"kind\":1,\"startTimeUnixNano\":\"").append(startWall).append("\",\"endTimeUnixNano\":\"").append(startWall + Math.max(ms, 1) * 1000000L)
+             .append("\",\"attributes\":").append(Json.attrs(a)).append(",\"status\":{}}");
+            exporter.span(b.toString());
+            // The same event as a row next to the inventory rows. OpenObserve cannot join traces to logs,
+            // and "exists but never used" needs both in one stream.
+            Map<String, Object> r = rumCommon(pagePath);
+            r.put("type", "action");
+            r.put("event_type", eventType);
+            r.put("target.text", text);
+            r.put("target.element", element);
+            r.put("target.page", home);
+            r.put("duration_ms", Long.valueOf(ms));
+            exporter.log(logRecord(9, "INFO", eventType + " " + home + " [" + text + "] " + element, r, startWall));
+            exporter.flush();
+            Agent.debug(eventType + " " + pagePath + " [" + text + "] " + element + " " + ms + " ms");
+        }
+    }
+
+    /**
+     * Starts an action for a click, change, or submit; null once the agent is stopped. home is the
+     * page the control lives on, which is not always the page showing (a menu item lives on the window).
+     */
+    public Action interaction(String eventType, String toolkit, String pagePath, String home, String text, String element, String xpath, String id, String name) {
+        if (stopped) return null;
+        Action a = new Action(eventType, toolkit, pagePath, home, text, element, xpath, id, name);
+        synchronized (open) { open.add(a); }
+        arm(a.text, a.element, a.pagePath, a.home);
+        return a;
+    }
+
+    /** At stop and at JVM exit. A click on Exit never returns from its handler and would otherwise be lost. */
+    private void finishOpen() {
+        List<Action> left;
+        synchronized (open) { left = new ArrayList<Action>(open); }
+        long now = System.nanoTime();
+        for (Action a : left) a.finish(now);
     }
 
     // ---- views and errors (same column names as OpenObserve RUM, stream ui_views) -------------
@@ -246,6 +424,7 @@ public final class Telemetry {
         exporter.log(logRecord(9, "INFO", "view " + path, a));
     }
 
+    /** An uncaught exception. source is "swing", "javafx", or "thread:name". Names the control when its handler threw. */
     public void error(String message, String stack, String source, String path) {
         if (stopped) return;
         Map<String, Object> a = rumCommon(path);
@@ -253,6 +432,11 @@ public final class Telemetry {
         a.put("error_message", message);
         a.put("error_stack", stack);
         a.put("error_source", source);
+        Map<String, Object> control = failedControl(source);
+        if (control != null) {
+            a.putAll(control);
+            Agent.debug("error after [" + control.get("target.text") + "] " + control.get("target.element"));
+        }
         exporter.log(logRecord(17, "ERROR", message, a));
         exporter.flush();
     }
@@ -298,9 +482,12 @@ public final class Telemetry {
     }
 
     private String logRecord(int sevNum, String sevText, String body, Map<String, Object> attrs) {
-        long now = nowNanos();
+        return logRecord(sevNum, sevText, body, attrs, nowNanos());
+    }
+
+    private String logRecord(int sevNum, String sevText, String body, Map<String, Object> attrs, long atNanos) {
         StringBuilder b = new StringBuilder(512);
-        b.append("{\"timeUnixNano\":\"").append(now).append("\",\"observedTimeUnixNano\":\"").append(now)
+        b.append("{\"timeUnixNano\":\"").append(atNanos).append("\",\"observedTimeUnixNano\":\"").append(nowNanos())
          .append("\",\"severityNumber\":").append(sevNum).append(",\"severityText\":").append(Json.str(sevText))
          .append(",\"body\":{\"stringValue\":").append(Json.str(body == null ? "" : body)).append("},\"attributes\":").append(Json.attrs(attrs)).append('}');
         return b.toString();

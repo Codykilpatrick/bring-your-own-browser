@@ -137,6 +137,45 @@ not a plan.
   so it cannot see app classes that live in custom class loaders unless they come through the
   AWT or JavaFX event path, which all UI events do.
 
+## 0.2.0: unused controls, slow controls, several apps on one machine
+
+Tested with the same two apps and five runs (Java 6, 7, 8 Swing; JavaFX on 8 and 17; premain,
+`JAVA_TOOL_OPTIONS`, and attach), plus one container running three copies of Sonar Console, one
+Fire Control, and one JVM that matched nothing.
+
+- **Never used, without a catalog.** The agent lists every control it finds and the "Java feature
+  use" dashboard subtracts the ones that were clicked. The scenarios leave fourteen labelled
+  controls alone on purpose (Print Summary, Exit, Drop Contact, Clear History, Abort All,
+  Hold All, ...). The "Never used" panel returned those fourteen and nothing else. An app
+  attached and left alone listed all of its main-window controls, including the ones on tabs
+  nobody had opened.
+- **Controls with no label cannot be told apart.** Fire Control's unused icon button and Sonar
+  Console's three used ones show in "Controls with no label" as one row per screen and kind.
+  A tooltip in the app is what gives each its own row.
+- **A dialog's controls appear when the dialog is first opened.** Until then the dialog is only
+  visible as the menu item or button that opens it. If that item shows as never used, so is
+  everything behind it.
+- **Slow controls.** Both apps have a button that blocks the event thread for 3 s. "Slowest
+  controls" showed them at 3008 and 3018 ms typical, counted as froze in every use, and nothing
+  else above 150 ms. The time is the event thread's time in the handler. A menu item that opens
+  a dialog is timed until the dialog appears, not until it closes.
+- **Exceptions name the control.** `Self Test` (both apps) and a toolbar button patched to throw
+  appear in "Controls that threw" with the control, its screen, and the message. The Java 6 X11
+  `NullPointerException` above is filed under the dialog's `OK` button, which is where it
+  happens.
+- **Changing titles.** Fire Control opens `Engagement 1`, `Engagement 2`, ... With
+  `title_trim = \d+` they are one screen, `/Fire Control/Engagement *`.
+- **`attach-all`.** First run: three `attached`, one `skipped`. Second run: three `already`. After
+  `stop` on one, only that one is attached again. The three copies of one app are separate rows
+  in "Copies of each app" (`service_instance_id`, pid, user).
+- **Other users.** A JVM takes an agent only from the user that started it. Run as root, a
+  plain attach to another user's Java 8 app waited 10 s, failed, and made the app print a full
+  thread dump to its stdout. `attach-all` now checks the owner first and prints the `sudo -u`
+  command instead. Run as that user, it attached.
+- **Not tested:** attach on a Java 9+ app without a matching JDK on the machine (the README
+  rule still applies), SELinux or container boundaries between the command and the app, and
+  apps started by a service manager with a private `/tmp` (attach needs the app's `/tmp`).
+
 ## Rollout sketch
 
 1. Ship `out/ui-agent/ui-agent.jar` and `out/ui-agent/README.md` (the install card) with the

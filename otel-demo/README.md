@@ -83,7 +83,7 @@ above, redo both steps after every OpenObserve restart.
    Upload File, select `chart/files/feature_catalog.csv`, then Save.
 2. Dashboards, Import, File Upload / JSON. Import each file in `chart/files/dashboards/`:
    `usage-summary.json`, `feature-inventory.json`, `collection-coverage.json`,
-   `java-app-health.json`.
+   `java-app-health.json`, `java-feature-use.json`.
 3. Open "Feature inventory". Every cataloged page and control is listed, least used first. Before
    calling a zero unused, check "Collection coverage" for the same time range.
 
@@ -112,9 +112,15 @@ UI_AGENT_ENV=<site>
 
 Start the app, click around, then look in OpenObserve: Traces, `service_name = <name>`; Logs,
 stream `ui_views`, rows with `view_url = /Window title/Tab`; Metrics, `jvm_memory_used`. The
-"Java app health" dashboard shows heap, event thread freezes, uncaught exceptions, and log errors
-per app. `ui-agent/README.md` has every setting, the attach-to-a-running-process option, and
-what to check when nothing arrives.
+"Java app health" dashboard shows heap, event thread freezes, uncaught exceptions, log errors,
+and the slowest controls per app. "Java feature use" lists every control the agent found in each
+app and which of them nobody has used; it needs no catalog. `ui-agent/README.md` has every
+setting, the attach-to-a-running-process option, and what to check when nothing arrives.
+
+When several Java apps run on one machine, fill in `ui-agent/apps.conf` (one section per app) and
+run `java -jar /opt/ui-agent/ui-agent.jar attach-all /opt/ui-agent/apps.conf` as the user that
+runs the apps. It attaches to every running app that matches a section and can be run again
+whenever an app restarts.
 
 Headlamp shows Secrets and a token login, so give it `privacy: mask` on its `apps` entry. Its
 replays then show every piece of text as `x`. `privacy` on an app overrides

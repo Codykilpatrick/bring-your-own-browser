@@ -61,6 +61,8 @@ public final class SwingHook implements AWTEventListener {
     private final boolean maskValues;
     private final Map<Object, Object> hooked = Collections.synchronizedMap(new WeakHashMap<Object, Object>());
     private final Map<Window, Object> openedWindows = Collections.synchronizedMap(new WeakHashMap<Window, Object>());
+    /** Controls already written to the inventory. */
+    private final Map<Object, Object> noted = Collections.synchronizedMap(new WeakHashMap<Object, Object>());
 
     public SwingHook(Telemetry t) {
         this.t = t;
@@ -123,6 +125,8 @@ public final class SwingHook implements AWTEventListener {
                 case WindowEvent.WINDOW_ACTIVATED: {
                     Window w = ((WindowEvent) e).getWindow();
                     syncFocus();
+                    // A window hidden and shown again gets no WINDOW_OPENED; pick up what was added meanwhile.
+                    hookTree(w);
                     if (isPage(w) && openedWindows.containsKey(w) && w != Views.activeWindow) Views.activate(t, w, pathOf(w, null));
                     break;
                 }
@@ -162,6 +166,7 @@ public final class SwingHook implements AWTEventListener {
     void hookTree(Component c) {
         if (c == null) return;
         hookOne(c);
+        if (hooked.containsKey(c)) note(c);
         if (c instanceof JMenu) {
             for (Component m : ((JMenu) c).getMenuComponents()) hookTree(m);
         }
@@ -190,72 +195,51 @@ public final class SwingHook implements AWTEventListener {
                             || c instanceof javax.swing.JRadioButtonMenuItem) interaction("change", c);
                     else interaction("click", c);
                 }
-            });
-            note(c);
-        } else if (c instanceof JTabbedPane) {
+            });        } else if (c instanceof JTabbedPane) {
             if (!mark(c)) return;
             final JTabbedPane tabs = (JTabbedPane) c;
             tabs.addChangeListener(new ChangeListener() {
                 public void stateChanged(ChangeEvent e) { tabChanged(tabs); }
             });
-            noteTabs(tabs);
         } else if (c instanceof JComboBox) {
             if (!mark(c)) return;
             ((JComboBox) c).addActionListener(new ActionListener() {
                 public void actionPerformed(ActionEvent e) { if (fromUser()) interaction("change", c); }
-            });
-            note(c);
-        } else if (c instanceof JSlider) {
+            });        } else if (c instanceof JSlider) {
             if (!mark(c)) return;
             ((JSlider) c).addChangeListener(new ChangeListener() {
                 public void stateChanged(ChangeEvent e) {
                     if (!((JSlider) c).getValueIsAdjusting() && fromUser()) interaction("change", c);
                 }
-            });
-            note(c);
-        } else if (c instanceof JSpinner) {
+            });        } else if (c instanceof JSpinner) {
             if (!mark(c)) return;
             ((JSpinner) c).addChangeListener(new ChangeListener() {
                 public void stateChanged(ChangeEvent e) { if (fromUser()) interaction("change", c); }
-            });
-            note(c);
-        } else if (c instanceof javax.swing.JTextField) {
+            });        } else if (c instanceof javax.swing.JTextField) {
             if (!mark(c)) return;
             ((javax.swing.JTextField) c).addActionListener(new ActionListener() {
                 public void actionPerformed(ActionEvent e) { if (fromUser()) interaction("submit", c); }
-            });
-            note(c);
-        } else if (c instanceof Button) {
+            });        } else if (c instanceof Button) {
             if (!mark(c)) return;
             ((Button) c).addActionListener(new ActionListener() {
                 public void actionPerformed(ActionEvent e) { if (fromUser()) interaction("click", c); }
-            });
-            note(c);
-        } else if (c instanceof Checkbox) {
+            });        } else if (c instanceof Checkbox) {
             if (!mark(c)) return;
             ((Checkbox) c).addItemListener(new ItemListener() {
                 public void itemStateChanged(ItemEvent e) { if (fromUser()) interaction("change", c); }
-            });
-            note(c);
-        } else if (c instanceof Choice) {
+            });        } else if (c instanceof Choice) {
             if (!mark(c)) return;
             ((Choice) c).addItemListener(new ItemListener() {
                 public void itemStateChanged(ItemEvent e) { if (fromUser()) interaction("change", c); }
-            });
-            note(c);
-        } else if (c instanceof TextField) {
+            });        } else if (c instanceof TextField) {
             if (!mark(c)) return;
             ((TextField) c).addActionListener(new ActionListener() {
                 public void actionPerformed(ActionEvent e) { if (fromUser()) interaction("submit", c); }
-            });
-            note(c);
-        } else if (c instanceof java.awt.List) {
+            });        } else if (c instanceof java.awt.List) {
             if (!mark(c)) return;
             ((java.awt.List) c).addActionListener(new ActionListener() {
                 public void actionPerformed(ActionEvent e) { if (fromUser()) interaction("click", c); }
-            });
-            note(c);
-        }
+            });        }
     }
 
     private void hookMenuBar(MenuBar bar) {
@@ -288,7 +272,8 @@ public final class SwingHook implements AWTEventListener {
         Frame frame = null;
         for (Frame f : Frame.getFrames()) if (f.getMenuBar() == bar) frame = f;
         String path = frame == null ? Views.currentPath() : pathOf(frame, null);
-        t.interaction(type, "awt", path, item.getLabel(), "MenuItem", "MenuBar/Menu/MenuItem", "", "");
+        String home = frame == null ? path : homeOf(frame, null);
+        UserEventQueue.track(t.interaction(type, "awt", path, home, item.getLabel(), "MenuItem", "MenuBar/Menu/MenuItem", "", ""));
     }
 
     /** Arrow buttons inside combos, spinners, scroll bars, and other look-and-feel internals. */
@@ -311,16 +296,65 @@ public final class SwingHook implements AWTEventListener {
         return UserEventQueue.inUserEvent();
     }
 
-    /** Pushed onto the system queue; the only thing it adds is the bookkeeping for fromUser(). */
+    /**
+     * Pushed onto the system queue. It adds the bookkeeping for fromUser(), and it times each user
+     * event from when it leaves the queue to when the app's listeners have all returned.
+     */
     static final class UserEventQueue extends EventQueue {
         static SwingHook hook;
-        private static final ThreadLocal<java.util.ArrayList<Boolean>> STACK = new ThreadLocal<java.util.ArrayList<Boolean>>() {
-            protected java.util.ArrayList<Boolean> initialValue() { return new java.util.ArrayList<Boolean>(); }
+
+        /** One dispatchEvent call. A modal dialog pumps its events from inside the event that opened it, so these nest. */
+        static final class Dispatch {
+            final boolean user;
+            final int id, key;
+            /** The hooked control this event is aimed at, if any. */
+            Component control;
+            final long start = System.nanoTime();
+            /** When a dialog opened from inside this event started taking events. The handler's own time ends there. */
+            long nestedAt;
+            boolean counted;
+            java.util.ArrayList<Telemetry.Action> actions;
+
+            Dispatch(AWTEvent e) {
+                user = isUser(e);
+                id = e.getID();
+                key = e instanceof KeyEvent ? ((KeyEvent) e).getKeyCode() : 0;
+            }
+
+            void finish(long end) {
+                if (actions == null) return;
+                for (Telemetry.Action a : actions) a.finish(end);
+                actions = null;
+            }
+        }
+
+        private static final ThreadLocal<java.util.ArrayList<Dispatch>> STACK = new ThreadLocal<java.util.ArrayList<Dispatch>>() {
+            protected java.util.ArrayList<Dispatch> initialValue() { return new java.util.ArrayList<Dispatch>(); }
         };
 
         static boolean inUserEvent() {
-            java.util.ArrayList<Boolean> s = STACK.get();
-            return !s.isEmpty() && s.get(s.size() - 1).booleanValue();
+            java.util.ArrayList<Dispatch> s = STACK.get();
+            return !s.isEmpty() && s.get(s.size() - 1).user;
+        }
+
+        /** Holds the action until the event being dispatched on this thread has been handled. */
+        static void track(Telemetry.Action a) {
+            if (a == null) return;
+            java.util.ArrayList<Dispatch> s = STACK.get();
+            if (s.isEmpty()) {
+                a.finish(System.nanoTime());
+                return;
+            }
+            Dispatch d = s.get(s.size() - 1);
+            d.counted = true;
+            a.startedAt(d.start);
+            if (d.nestedAt != 0) {
+                // The app's listener ran first and opened a dialog; the time the dialog stayed up is not the handler's.
+                a.finish(d.nestedAt);
+                return;
+            }
+            if (d.actions == null) d.actions = new java.util.ArrayList<Telemetry.Action>(2);
+            d.actions.add(a);
         }
 
         static boolean isUser(AWTEvent e) {
@@ -334,30 +368,71 @@ public final class SwingHook implements AWTEventListener {
         }
 
         protected void dispatchEvent(AWTEvent e) {
-            if (hook != null) hook.armFrom(e);
-            java.util.ArrayList<Boolean> s = STACK.get();
-            s.add(Boolean.valueOf(isUser(e)));
+            SwingHook h = hook;
+            java.util.ArrayList<Dispatch> s = STACK.get();
+            Dispatch d = new Dispatch(e);
+            if (h != null) d.control = h.armFrom(e);
+            if (!s.isEmpty()) {
+                Dispatch outer = s.get(s.size() - 1);
+                if (outer.nestedAt == 0) {
+                    outer.nestedAt = d.start;
+                    outer.finish(d.start);
+                }
+            }
+            s.add(d);
             try {
                 super.dispatchEvent(e);
+            } catch (RuntimeException ex) {
+                if (h != null) h.handlerThrew(d);
+                throw ex;
+            } catch (Error ex) {
+                if (h != null) h.handlerThrew(d);
+                throw ex;
             } finally {
                 s.remove(s.size() - 1);
+                d.finish(d.nestedAt != 0 ? d.nestedAt : System.nanoTime());
             }
         }
     }
 
-    /** Names the control before the app's listener runs, so a stall inside that listener can be blamed on it. */
-    void armFrom(AWTEvent e) {
+    /**
+     * Names the control before the app's listener runs, so a stall or an exception inside that listener
+     * can be blamed on it. Returns the control when it is one this hook listens to.
+     */
+    Component armFrom(AWTEvent e) {
         int id = e.getID();
         if (id != MouseEvent.MOUSE_PRESSED && id != MouseEvent.MOUSE_RELEASED && id != MouseEvent.MOUSE_CLICKED
-                && id != KeyEvent.KEY_PRESSED && !(e instanceof ActionEvent) && !(e instanceof ItemEvent)) return;
+                && id != KeyEvent.KEY_PRESSED && !(e instanceof ActionEvent) && !(e instanceof ItemEvent)) return null;
         Object src = e.getSource();
         if (src instanceof MenuItem) {
-            t.arm(((MenuItem) src).getLabel(), "MenuItem", Views.currentPath());
-            return;
+            t.arm(((MenuItem) src).getLabel(), "MenuItem", Views.currentPath(), Views.currentPath());
+            return null;
         }
-        if (!(src instanceof Component)) return;
+        if (!(src instanceof Component)) return null;
         Component c = (Component) src;
-        if (isLookAndFeelPart(c)) {
+        // The queue hands out mouse and key events addressed to the window. Swing picks the control afterwards.
+        if (e instanceof MouseEvent) {
+            Component deep = SwingUtilities.getDeepestComponentAt(c, ((MouseEvent) e).getX(), ((MouseEvent) e).getY());
+            if (deep != null) c = deep;
+        } else if (e instanceof KeyEvent) {
+            // With a menu open the key goes to the menu (the highlighted item, or a mnemonic in the open
+            // list), not to whatever has the focus.
+            javax.swing.MenuElement[] menu = javax.swing.MenuSelectionManager.defaultManager().getSelectedPath();
+            Component to = menu.length > 0 ? menu[menu.length - 1].getComponent()
+                    : java.awt.KeyboardFocusManager.getCurrentKeyboardFocusManager().getFocusOwner();
+            if (to instanceof JPopupMenu && ((JPopupMenu) to).getInvoker() != null) to = ((JPopupMenu) to).getInvoker();
+            if (to != null) c = to;
+        }
+        Component control = null;
+        for (Component p = c; p != null && !(p instanceof Window); p = parentOf(p)) {
+            if (hooked.containsKey(p)) {
+                control = p;
+                break;
+            }
+        }
+        if (control != null) {
+            c = control;
+        } else if (isLookAndFeelPart(c)) {
             for (Component p = c; p != null; p = parentOf(p)) {
                 if (p instanceof JComboBox || p instanceof JSpinner || p instanceof JScrollBar || p instanceof AbstractButton) {
                     c = p;
@@ -366,39 +441,77 @@ public final class SwingHook implements AWTEventListener {
             }
         }
         Window w = windowOf(c);
-        String el = c.getClass().getSimpleName();
-        if (el.length() == 0) el = c.getClass().getSuperclass().getSimpleName();
-        t.arm(label(c), el, w == null ? Views.currentPath() : pathOf(w, c));
+        String path = w == null ? Views.currentPath() : pathOf(w, c);
+        t.arm(label(c), element(c), path, w == null ? path : homeOf(w, c));
+        return control instanceof JTabbedPane ? null : control;
     }
 
+    /**
+     * The app's own listener threw while a user event was being handled. The exception row that follows
+     * names the control only when an action was recorded for this event; otherwise it would be a guess.
+     */
+    void handlerThrew(UserEventQueue.Dispatch d) {
+        if (!d.user) return;
+        Component c = d.control;
+        // Listeners run last added first. When the app's ran before ours and threw, ours never ran, so
+        // count the use here. A mouse press alone does not activate a control, and neither does a key
+        // other than Enter unless the control is a button or a menu item.
+        boolean activates = d.id != MouseEvent.MOUSE_PRESSED
+                && (d.id != KeyEvent.KEY_PRESSED || d.key == KeyEvent.VK_ENTER || c instanceof AbstractButton);
+        if (c != null && !d.counted && activates) {
+            String type = c instanceof javax.swing.JToggleButton || c instanceof javax.swing.JCheckBoxMenuItem || c instanceof javax.swing.JRadioButtonMenuItem ? "change"
+                    : c instanceof AbstractButton || c instanceof Button || c instanceof java.awt.List ? "click"
+                    : c instanceof javax.swing.JTextField || c instanceof TextField ? "submit" : "change";
+            interaction(type, c);
+        }
+        if (d.counted) t.threw();
+    }
+
+    static String element(Component c) {
+        String el = c.getClass().getSimpleName();
+        return el.length() == 0 ? c.getClass().getSuperclass().getSimpleName() : el;
+    }
+
+    /** Writes a hooked control to the inventory the first time it is seen inside a window that is showing. */
     private void note(Component c) {
         Window w = windowOf(c);
-        String el = c.getClass().getSimpleName();
-        if (el.length() == 0) el = c.getClass().getSuperclass().getSimpleName();
-        t.inventory(w == null ? Views.currentPath() : pathOf(w, c), label(c), el);
+        if (w == null || !w.isShowing()) return;
+        if (c instanceof JTabbedPane) {
+            noteTabs((JTabbedPane) c);
+            return;
+        }
+        if (noted.put(c, MARK) != null) return;
+        // The text field inside a spinner or an editable combo, and a table's cell editor, are parts of
+        // those controls, not controls a user would look for.
+        if (c instanceof JTextComponent) {
+            for (Component p = c.getParent(); p != null && !(p instanceof Window); p = p.getParent()) {
+                if (p instanceof JSpinner || p instanceof JComboBox || p instanceof JTable || p instanceof JTree) return;
+            }
+        }
+        t.inventory(homeOf(w, c), label(c), element(c));
     }
 
     private void noteTabs(JTabbedPane tabs) {
         Window w = windowOf(tabs);
-        String path = w == null ? Views.currentPath() : pathOf(w, tabs);
-        for (int i = 0; i < tabs.getTabCount(); i++) t.inventory(path, plain(tabs.getTitleAt(i)), "JTabbedPane");
+        if (w == null) return;
+        String home = homeOf(w, tabs);
+        for (int i = 0; i < tabs.getTabCount(); i++) t.inventory(home, plain(tabs.getTitleAt(i)), "JTabbedPane");
     }
 
     private void noteMenu(MenuItem item, MenuBar bar) {
         Frame frame = null;
         for (Frame f : Frame.getFrames()) if (f.getMenuBar() == bar) frame = f;
-        String path = frame == null ? Views.currentPath() : pathOf(frame, null);
-        t.inventory(path, item.getLabel(), "MenuItem");
+        t.inventory(frame == null ? Views.currentPath() : homeOf(frame, null), item.getLabel(), "MenuItem");
     }
 
     private void tabChanged(JTabbedPane tabs) {
         Window w = SwingUtilities.getWindowAncestor(tabs);
         if (w == null || !w.isShowing()) return;
         int i = tabs.getSelectedIndex();
-        String title = i >= 0 ? tabs.getTitleAt(i) : null;
+        String title = i >= 0 ? plain(tabs.getTitleAt(i)) : null;
         String path = pathOf(w, tabs);
         if (fromUser()) {
-            t.interaction("click", "swing", path, title, "JTabbedPane", xpath(tabs), "", tabs.getName());
+            UserEventQueue.track(t.interaction("click", "swing", path, homeOf(w, tabs), title, "JTabbedPane", xpath(tabs), "", tabs.getName()));
         }
         noteTabs(tabs);
         Views.routeChange(t, w, path);
@@ -442,8 +555,7 @@ public final class SwingHook implements AWTEventListener {
         Window w = windowOf(c);
         String path = w == null ? Views.currentPath() : pathOf(w, c);
         String name = c.getName();
-        t.interaction(type, "swing", path, label(c), c.getClass().getSimpleName().length() == 0 ? c.getClass().getSuperclass().getSimpleName() : c.getClass().getSimpleName(),
-                xpath(c), "", name == null ? "" : name);
+        UserEventQueue.track(t.interaction(type, "swing", path, w == null ? path : homeOf(w, c), label(c), element(c), xpath(c), "", name == null ? "" : name));
     }
 
     /** A human name for the control. Never the value typed or the row's data under mask-values. */
@@ -539,6 +651,22 @@ public final class SwingHook implements AWTEventListener {
         String tab = null;
         if (tabs != null && tabs.getSelectedIndex() >= 0) tab = tabs.getTitleAt(tabs.getSelectedIndex());
         return Views.path(title(w), tab);
+    }
+
+    /**
+     * Where a control lives, whichever tab happens to be showing: "/Frame title/Tab that contains it",
+     * or "/Frame title" for menus, toolbars, and anything else outside the tabs. A dialog is its own
+     * page. The inventory and each use are filed under this, so the two can be compared.
+     */
+    static String homeOf(Window w, Component c) {
+        if (w instanceof Dialog) return pathOf(w, c);
+        for (Component p = c; p != null && !(p instanceof Window); p = parentOf(p)) {
+            Component parent = parentOf(p);
+            if (!(parent instanceof JTabbedPane)) continue;
+            int i = ((JTabbedPane) parent).indexOfComponent(p);
+            if (i >= 0) return Views.path(title(w), ((JTabbedPane) parent).getTitleAt(i));
+        }
+        return Views.path(title(w), null);
     }
 
     static JTabbedPane findTabs(Container c) {

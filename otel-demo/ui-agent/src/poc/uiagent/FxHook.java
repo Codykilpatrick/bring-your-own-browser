@@ -20,6 +20,8 @@ public final class FxHook implements Runnable {
     private final Map<Object, Object> hooked = Collections.synchronizedMap(new WeakHashMap<Object, Object>());
     private final Map<Object, Object> shownWindows = Collections.synchronizedMap(new WeakHashMap<Object, Object>());
     private Object lastEvent;
+    /** The window scan() is walking. Menu items are not in the scene graph and cannot say which window they are in. */
+    private Object scanWindow;
     private Object actionHandler, clickHandler, releaseHandler, activityHandler;
     private volatile boolean stopped;
 
@@ -86,7 +88,9 @@ public final class FxHook implements Runnable {
             if (Reflect.is(w, "javafx.stage.PopupWindow")) continue;
             Object scene = Reflect.call(w, "getScene");
             if (scene != null && hooked.put(scene, Boolean.TRUE) == null) hookScene(scene);
+            scanWindow = w;
             if (scene != null) walk(Reflect.call(scene, "getRoot"));
+            scanWindow = null;
             Boolean showing = (Boolean) Reflect.call(w, "isShowing");
             if (Boolean.TRUE.equals(showing) && shownWindows.put(w, Boolean.TRUE) == null) windowShown(w);
         }
@@ -163,9 +167,10 @@ public final class FxHook implements Runnable {
     }
 
     private void note(Object node) {
-        Object w = windowOf(node);
-        String path = w == null ? Views.currentPath() : pathOf(w, node);
-        t.inventory(path, label(node), node.getClass().getSimpleName());
+        // The hidden text field inside a combo box or spinner is part of that control.
+        if (node.getClass().getSimpleName().equals("FakeFocusTextField")) return;
+        Object w = scanWindow != null && Reflect.is(node, "javafx.scene.control.MenuItem") ? ownerStage(scanWindow) : windowOf(node);
+        t.inventory(w == null ? Views.currentPath() : homeOf(w, node), label(node), node.getClass().getSimpleName());
     }
 
     @SuppressWarnings("unchecked")
@@ -202,8 +207,7 @@ public final class FxHook implements Runnable {
         if (tabs instanceof List) {
             for (Object tab : (List<?>) tabs) {
                 Object w = windowOf(tabPane);
-                String path = w == null ? Views.currentPath() : pathOf(w, tabPane);
-                t.inventory(path, mnemonicFree((String) Reflect.call(tab, "getText")), "TabPane");
+                t.inventory(w == null ? Views.currentPath() : homeOf(w, tabPane), mnemonicFree((String) Reflect.call(tab, "getText")), "TabPane");
             }
         }
     }
@@ -280,9 +284,23 @@ public final class FxHook implements Runnable {
         if (w == null || !Boolean.TRUE.equals(Reflect.call(w, "isShowing"))) return;
         String path = pathOf(w, tabPane);
         String title = mnemonicFree((String) Reflect.call(tab, "getText"));
-        t.inventory(path, title, "TabPane");
-        t.interaction("click", "javafx", path, title, "TabPane", xpath(tabPane), id(tabPane), "");
+        String home = homeOf(w, tabPane);
+        t.inventory(home, title, "TabPane");
+        track(t.interaction("click", "javafx", path, home, title, "TabPane", xpath(tabPane), id(tabPane), ""));
         Views.routeChange(t, w, path);
+    }
+
+    /**
+     * Ends the action once the app's own handlers have run. Our filter fires before them, and a
+     * runLater queued from it runs after the event has been handled, or as soon as a dialog the
+     * handler opened starts taking events.
+     */
+    private static void track(final Telemetry.Action a) {
+        if (a == null) return;
+        boolean queued = runLater(new Runnable() {
+            public void run() { a.finish(System.nanoTime()); }
+        });
+        if (!queued) a.finish(System.nanoTime());
     }
 
     private static boolean is(Object o, String controlName) {
@@ -294,7 +312,7 @@ public final class FxHook implements Runnable {
     private void interaction(String type, Object target) {
         Object w = windowOf(target);
         String path = w == null ? Views.currentPath() : pathOf(w, target);
-        t.interaction(type, "javafx", path, label(target), target.getClass().getSimpleName(), xpath(target), id(target), "");
+        track(t.interaction(type, "javafx", path, w == null ? path : homeOf(w, target), label(target), target.getClass().getSimpleName(), xpath(target), id(target), ""));
     }
 
     private static String id(Object n) {
@@ -409,6 +427,34 @@ public final class FxHook implements Runnable {
             if (sel != null) tab = mnemonicFree((String) Reflect.call(sel, "getText"));
         }
         return Views.path(title, tab);
+    }
+
+    /**
+     * Where a control lives, whichever tab happens to be showing: "/Stage title/Tab that contains it",
+     * or "/Stage title" for menus, toolbars, and anything else outside the tabs. An owned stage is its
+     * own page, as in pathOf.
+     */
+    static String homeOf(Object w, Object node) {
+        String title = (String) Reflect.call(w, "getTitle");
+        Object owner = Reflect.call(w, "getOwner");
+        if (owner != null) {
+            String ot = (String) Reflect.call(owner, "getTitle");
+            if (!SwingHook.empty(ot)) return Views.path(ot, title);
+        }
+        // Menu items are not in the scene graph; they live on the window.
+        if (node == null || Reflect.is(node, "javafx.scene.control.MenuItem")) return Views.path(title, null);
+        List<Object> below = new ArrayList<Object>();
+        for (Object n = node; n != null && below.size() < 60; n = Reflect.call(n, "getParent")) {
+            Object tabs = is(n, "TabPane") && !below.isEmpty() ? Reflect.call(n, "getTabs") : null;
+            if (tabs instanceof List) {
+                for (Object tab : (List<?>) tabs) {
+                    Object content = Reflect.call(tab, "getContent");
+                    if (content != null && below.contains(content)) return Views.path(title, mnemonicFree((String) Reflect.call(tab, "getText")));
+                }
+            }
+            below.add(n);
+        }
+        return Views.path(title, null);
     }
 
     @SuppressWarnings("unchecked")

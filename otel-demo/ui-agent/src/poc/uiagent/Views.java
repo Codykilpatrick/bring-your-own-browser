@@ -6,6 +6,8 @@ public final class Views {
     /** The window (Swing Window or FX Stage) whose view is open under the "active" key. */
     static volatile Object activeWindow;
     static volatile boolean firstView = true;
+    /** Config.titleTrim compiled, or null. Titles that carry a file name or a track number would otherwise each be a page of their own. */
+    private static volatile java.util.regex.Pattern trim;
 
     private Views() { }
 
@@ -34,11 +36,40 @@ public final class Views {
         }
     }
 
+    static void setTrim(String regex) {
+        trim = null;
+        if (regex == null || regex.length() == 0) return;
+        try {
+            trim = java.util.regex.Pattern.compile(regex);
+        } catch (Exception e) {
+            Agent.info("title_trim ignored, not a regular expression: " + regex);
+        }
+    }
+
+    static String trimmed(String title) {
+        java.util.regex.Pattern p = trim;
+        if (p == null || title == null) return title;
+        return p.matcher(title).replaceAll("*").trim();
+    }
+
     /** "/Window title/Tab title"; untitled windows are "/untitled". */
     public static String path(String windowTitle, String tab) {
+        windowTitle = trimmed(windowTitle);
+        tab = trimmed(tab);
         String w = windowTitle == null || windowTitle.trim().length() == 0 ? "untitled" : windowTitle.trim();
         String p = "/" + w.replace('/', ' ');
         if (tab != null && tab.trim().length() > 0) p += "/" + tab.trim().replace('/', ' ');
         return p;
+    }
+
+    static void selfCheck() {
+        if (!"/Plot/Gain".equals(path("Plot", "Gain"))) throw new AssertionError("no trim");
+        setTrim(" - .*$|\\d+");
+        try {
+            if (!"/Engagement *".equals(path("Engagement 12", null))) throw new AssertionError("number: " + path("Engagement 12", null));
+            if (!"/Editor*/Tab *".equals(path("Editor - notes.txt", "Tab 3"))) throw new AssertionError("suffix: " + path("Editor - notes.txt", "Tab 3"));
+        } finally {
+            setTrim(null);
+        }
     }
 }

@@ -46,6 +46,7 @@ public final class Health implements Runnable {
                 swing.check(now);
                 fx.check(now);
                 t.presenceTick(now);
+                t.inventoryTick(now);
                 Errors.wrapDefault(t);
                 if (now - lastReport >= t.cfg.healthSeconds * 1000L) {
                     lastReport = now;

@@ -5,4 +5,4 @@ Main-Class: poc.uiagent.Agent
 Can-Redefine-Classes: false
 Can-Retransform-Classes: false
 Implementation-Title: poc-ui-agent
-Implementation-Version: 0.1.0
+Implementation-Version: 0.2.0

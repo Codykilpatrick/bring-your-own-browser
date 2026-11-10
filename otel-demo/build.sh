@@ -22,7 +22,7 @@ cp README.md out/
 # Java desktop agent: one jar for Java 6+, plus its install card.
 (cd ui-agent && ./build.sh)
 mkdir -p out/ui-agent
-cp ui-agent/dist/ui-agent.jar ui-agent/dist/tools.jar ui-agent/dist/libattach.so ui-agent/README.md out/ui-agent/
+cp ui-agent/dist/ui-agent.jar ui-agent/dist/tools.jar ui-agent/dist/libattach.so ui-agent/README.md ui-agent/apps.conf out/ui-agent/
 
 (cd out && find otel-poc-images.tar chart README.md ui-agent -type f -exec sha256sum {} + > SHA256SUMS)
 ls -lh out

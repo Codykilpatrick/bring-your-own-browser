@@ -23,6 +23,8 @@ public final class Telemetry {
     private long lastInput, presentSince, armedAt;
     private boolean focused;
     private String armedText = "", armedElement = "", armedPath = "";
+    /** Set by Agent.stop. Listeners left on controls still call in; they are dropped here. */
+    private volatile boolean stopped;
 
     public Telemetry(Config cfg) {
         this.cfg = cfg;
@@ -45,8 +47,15 @@ public final class Telemetry {
         };
     }
 
+    /** Stops taking new records and closes the open view. The exporter sends what is queued. */
+    public void stop() {
+        stopped = true;
+        endAllViews();
+    }
+
     /** Mouse, key, or a window coming forward. Throttled; the health tick turns this into presence time. */
     public void touch() {
+        if (stopped) return;
         long now = System.currentTimeMillis();
         synchronized (this) {
             if (now - lastInput < 1000) return;
@@ -56,6 +65,7 @@ public final class Telemetry {
 
     /** A page window is in front. Losing that ends the current presence stretch. */
     public void focus(boolean on) {
+        if (stopped) return;
         synchronized (this) {
             focused = on;
             if (on) lastInput = System.currentTimeMillis();
@@ -95,6 +105,7 @@ public final class Telemetry {
      * A later listener for the same control must not move the timestamp forward.
      */
     public void arm(String text, String element, String path) {
+        if (stopped) return;
         synchronized (this) {
             long now = System.currentTimeMillis();
             if (armedAt != 0 && now - armedAt < cfg.freezeMillis + 1500
@@ -121,6 +132,7 @@ public final class Telemetry {
     /** One row per page, label, and control type for the life of the process.
      *  ponytail: two controls with the same label on one page collapse. Add the xpath to the key if that shows up. */
     public void inventory(String path, String label, String element) {
+        if (stopped) return;
         String key = (path == null ? "" : path) + "\0" + (element == null ? "" : element) + "\0" + (label == null ? "" : label);
         synchronized (inventorySeen) {
             if (!inventorySeen.add(key)) return;
@@ -175,6 +187,7 @@ public final class Telemetry {
 
     /** One span per click, change, or submit. Flushed right away, like poc.js does. */
     public void interaction(String eventType, String toolkit, String pagePath, String text, String element, String xpath, String id, String name) {
+        if (stopped) return;
         long now = nowNanos();
         Map<String, Object> a = Json.map();
         a.put("event_type", eventType);
@@ -201,6 +214,7 @@ public final class Telemetry {
 
     /** Starts a view for a window or tab key; ends whichever view that key had before. */
     public synchronized void viewStart(String key, String path, String loadingType) {
+        if (stopped) return;
         viewEnd(key);
         String id = hex(16);
         viewIds.put(key, id);
@@ -233,6 +247,7 @@ public final class Telemetry {
     }
 
     public void error(String message, String stack, String source, String path) {
+        if (stopped) return;
         Map<String, Object> a = rumCommon(path);
         a.put("type", "error");
         a.put("error_message", message);
@@ -261,6 +276,7 @@ public final class Telemetry {
     }
 
     public void log(String severity, String logger, String thread, String body, String kind, String stack, Map<String, Object> extra) {
+        if (stopped) return;
         Map<String, Object> a = Json.map();
         a.put("logger", logger);
         a.put("thread", thread);

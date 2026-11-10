@@ -61,4 +61,11 @@ public final class Errors implements Thread.UncaughtExceptionHandler {
     }
 
     static Errors current() { return current; }
+
+    /** Puts back the handler we wrapped, unless the app has replaced ours since. */
+    static void uninstall() {
+        Errors e = current;
+        if (e != null && Thread.getDefaultUncaughtExceptionHandler() == e) Thread.setDefaultUncaughtExceptionHandler(e.previous);
+        current = null;
+    }
 }

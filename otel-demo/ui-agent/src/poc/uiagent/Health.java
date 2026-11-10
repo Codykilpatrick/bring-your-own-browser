@@ -23,6 +23,7 @@ public final class Health implements Runnable {
     private final Pinger swing = new Pinger("swing", "AWT-EventQueue");
     private final Pinger fx = new Pinger("javafx", "JavaFX Application Thread");
     private long lastCpuNanos = -1, lastCpuWall;
+    private volatile boolean stopped;
 
     public Health(Telemetry t) { this.t = t; }
 
@@ -32,9 +33,11 @@ public final class Health implements Runnable {
         th.start();
     }
 
+    public void stop() { stopped = true; }
+
     public void run() {
         long lastReport = 0;
-        while (true) {
+        while (!stopped) {
             try {
                 Thread.sleep(1000);
                 long now = System.currentTimeMillis();

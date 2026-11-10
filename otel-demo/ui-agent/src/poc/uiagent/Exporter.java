@@ -30,15 +30,17 @@ public final class Exporter implements Runnable {
     /** Runs at shutdown before the queues drain, so a last presence row is not left unsent. */
     Runnable beforeShutdown;
 
+    private final Thread shutdownHook = new Thread("ui-agent-shutdown") {
+        public void run() { shutdown(); }
+    };
+
     public Exporter(Config cfg, String resourceJson) {
         this.cfg = cfg;
         this.resourceJson = resourceJson;
         Thread t = new Thread(this, "ui-agent-exporter");
         t.setDaemon(true);
         t.start();
-        Runtime.getRuntime().addShutdownHook(new Thread("ui-agent-shutdown") {
-            public void run() { shutdown(); }
-        });
+        Runtime.getRuntime().addShutdownHook(shutdownHook);
     }
 
     public void span(String json) { offer(spans, json); }
@@ -46,6 +48,7 @@ public final class Exporter implements Runnable {
     public void metric(String json) { offer(metrics, json); }
 
     private void offer(LinkedBlockingQueue<String> q, String json) {
+        if (stopped) return;
         while (!q.offer(json)) {
             if (q.poll() != null) dropped++;
         }
@@ -152,12 +155,23 @@ public final class Exporter implements Runnable {
         }
     }
 
+    /** Agent stop: send what is queued now and end the thread, instead of at JVM exit. */
+    void stop() {
+        try {
+            Runtime.getRuntime().removeShutdownHook(shutdownHook);
+        } catch (IllegalStateException alreadyExiting) {
+            return;
+        }
+        shutdown();
+        flush();
+    }
+
     void shutdown() {
-        stopped = true;
         try {
             if (beforeShutdown != null) beforeShutdown.run();
         } catch (Throwable ignored) {
         }
+        stopped = true;
         try {
             drain(spans, "/v1/traces", "resourceSpans", "scopeSpans", "spans");
             drain(logs, "/v1/logs", "resourceLogs", "scopeLogs", "logRecords");

@@ -43,29 +43,37 @@ Pick whichever the app's launch allows. All three give the same data; the differ
    and logs.
 
 3. **Already running.** Attach to the process. The app keeps the Java it already runs on. The
-   attach command is a second, short-lived program, and that one needs a JDK (`tools.jar` on Java
-   6 to 8, the `jdk.attach` module on 9 and newer). It also has to run as the same user as the
-   app, on the same machine. Attach cannot reach a process on another computer.
+   attach command is a second, short-lived program. It has to run as the same user as the app, on
+   the same machine. Attach cannot reach a process on another computer.
 
-   If `java` on that machine is a JDK, this is enough:
-
-   ```
-   java -jar ui-agent.jar list                 # pid and main class of each JVM
-   java -jar ui-agent.jar attach <pid> app=sonar-console,endpoint=http://10.0.0.5:4318
-   ```
-
-   If the machine only has a runtime, copy a JDK next to the agent and call it by its full path.
-   Leave it off `PATH` and leave the app's `JAVA_HOME` alone, so the app does not start on it.
+   On a Java 8 runtime (Linux x64), copy all three files from `out/ui-agent/` into one folder
+   and use the `java` that is already there:
 
    ```
-   /opt/ui-agent/jdk/bin/java -jar /opt/ui-agent/ui-agent.jar list
-   /opt/ui-agent/jdk/bin/java -jar /opt/ui-agent/ui-agent.jar attach <pid> app=sonar-console,endpoint=http://10.0.0.5:4318
+   /opt/ui-agent/ui-agent.jar
+   /opt/ui-agent/tools.jar        # attach classes, from the Zulu 8 JDK
+   /opt/ui-agent/libattach.so     # attach native library, from the same JDK
+
+   /opt/java64/bin/java -jar /opt/ui-agent/ui-agent.jar list      # pid and main class of each JVM
+   /opt/java64/bin/java -jar /opt/ui-agent/ui-agent.jar attach <pid> app=sonar-console,endpoint=http://10.0.0.5:4318
    ```
 
-   For apps on Java 6, 7, or 8, carry a Java 8 JDK. Its attach support reaches all three. For
-   apps that already run on Java 11 or 17, carry a JDK of that same version. The JDK build has
-   to match the workstation's operating system. Pointing the command at a plain runtime stops
-   with `No attach API: run this command with a JDK (tools.jar), not a JRE`.
+   A Java 8 JDK needs only `ui-agent.jar`. On Java 9 and newer the command needs a JDK of the
+   app's version (the `jdk.attach` module), and a Java 6 or 7 runtime cannot load the Java 8
+   `tools.jar`; run the command there with any Java 8 runtime or JDK by its full path. Without
+   the attach classes it stops with `No attach API: put tools.jar and libattach.so from a JDK 8
+   next to ...`.
+
+   To turn it off without restarting the app:
+
+   ```
+   /opt/java64/bin/java -jar /opt/ui-agent/ui-agent.jar stop <pid>
+   ```
+
+   It sends what is queued, removes its hooks, and ends its threads; the app's console shows
+   `[ui-agent] ui-agent stopped`. The code stays loaded until the app restarts (a JVM cannot
+   unload an agent), and attaching again starts it fresh. `stop` works the same on an agent
+   loaded with `-javaagent`.
 
    Nothing before the attach is recorded. Windows already open are picked up; clicks and log
    lines from before it are not.

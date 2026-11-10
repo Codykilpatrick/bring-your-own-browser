@@ -82,10 +82,10 @@ exit. The JVM prints `Picked up JAVA_TOOL_OPTIONS: ...` to stderr once; some wra
 treat any stderr output as failure. On Java 6 and 7 this worked unchanged.
 
 **C. Attach to the running process.** No change to launch or environment. The app keeps its own
-Java. The attach command is a second program and needs a JDK (`tools.jar` on 6 to 8, the
-`jdk.attach` module on 9+), the same user as the app, and the same machine. A workstation that
-only has a runtime can carry a JDK next to the agent and call it by full path; the install card
-in `ui-agent/README.md` has the commands. Someone or something still has to run
+Java. The attach command is a second program and needs the attach API (`tools.jar` plus
+`libattach.so` on 6 to 8, the `jdk.attach` module on 9+), the same user as the app, and the same
+machine. On a Java 8 runtime, the `tools.jar` and `libattach.so` shipped next to `ui-agent.jar`
+are enough; the install card in `ui-agent/README.md` has the commands. Someone or something still has to run
 `java -jar ui-agent.jar attach <pid>` after every app start.
 Windows already open are picked up by a scan on attach (the first view is a `route_change` with
 no `initial_load`), but clicks before the attach are gone. Log lines before the attach are gone
